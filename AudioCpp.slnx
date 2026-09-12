@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/AudioCpp.Demo/AudioCpp.Demo.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/AudioCpp/AudioCpp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AudioCpp.ModelTest/AudioCpp.ModelTest.csproj" />
+    <Project Path="tests/AudioCpp.PathTest/AudioCpp.PathTest.csproj" />
+  </Folder>
+</Solution>
