@@ -21,13 +21,13 @@
         <StackPanel Spacing="8">
 
           <TextBlock Text="Model" FontWeight="SemiBold" />
-          <TextBox Text="{Binding ModelPath}" Watermark="path to a .gguf or model directory" />
+          <TextBox Text="{Binding ModelPath}" PlaceholderText="path to a .gguf or model directory" />
           <StackPanel Orientation="Horizontal" Spacing="6">
             <Button Content="File…" Click="OnPickModelFile" />
             <Button Content="Folder…" Click="OnPickModelFolder" />
             <Button Content="Load" Command="{Binding LoadCommand}" />
           </StackPanel>
-          <TextBox Text="{Binding FamilyHint}" Watermark="family hint (optional, e.g. kokoro_tts)" />
+          <TextBox Text="{Binding FamilyHint}" PlaceholderText="family hint (optional, e.g. kokoro_tts)" />
 
           <Separator Margin="0,6" />
 
@@ -48,9 +48,9 @@
 
           <TextBlock Text="Input" FontWeight="SemiBold" />
           <TextBox Text="{Binding Text}" AcceptsReturn="True" Height="80"
-                   TextWrapping="Wrap" Watermark="text to synthesise (tts)" />
-          <TextBox Text="{Binding VoiceId}" Watermark="voice id (optional, e.g. af_heart)" />
-          <TextBox Text="{Binding AudioPath}" Watermark="input WAV (asr / vad / diar / sep)" />
+                   TextWrapping="Wrap" PlaceholderText="text to synthesise (tts)" />
+          <TextBox Text="{Binding VoiceId}" PlaceholderText="voice id (optional, e.g. af_heart)" />
+          <TextBox Text="{Binding AudioPath}" PlaceholderText="input WAV (asr / vad / diar / sep)" />
           <StackPanel Orientation="Horizontal" Spacing="6">
             <Button Content="Audio…" Click="OnPickAudio" />
             <Button Content="Run" Command="{Binding RunCommand}" FontWeight="SemiBold" />

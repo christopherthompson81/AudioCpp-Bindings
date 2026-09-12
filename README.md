@@ -14,7 +14,7 @@ bindings out, and the maintainer would rather not carry them.
 | `src/AudioCpp` | the binding — `net10.0`, AOT-compatible, no package references |
 | `tests/AudioCpp.PathTest` | the ABI contract, offline and streaming |
 | `tests/AudioCpp.ModelTest` | real families across five task types |
-| `samples/AudioCpp.Demo` | an Avalonia app driving the ABI |
+| `samples/AudioCpp.Demo` | an Avalonia 12 app driving the ABI |
 | `scripts/run-tests.sh` | runs both tests and checks they agree with the C tests |
 
 ## Prerequisites
