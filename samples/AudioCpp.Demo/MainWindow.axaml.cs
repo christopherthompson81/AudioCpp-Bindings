@@ -50,6 +50,15 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel viewModel) await viewModel.PickModelAsync(directory: false);
     }
 
+    private async void OnPickVadModel(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            var picked = await viewModel.PickPath!("Silero VAD model directory", true);
+            if (picked is not null) viewModel.VadModelPath = picked;
+        }
+    }
+
     private async void OnPickModelFolder(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel viewModel) await viewModel.PickModelAsync(directory: true);
