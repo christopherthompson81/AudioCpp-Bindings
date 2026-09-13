@@ -42,7 +42,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private int _chunkBudget = 1000;
     private readonly List<AudioSegment> _segments = [];
     private CancellationTokenSource? _cancel;
-    private bool _runInterruptible;
+    private bool _cancellable;
     private LiveTranscription? _live;
     private bool _togglingRecording;
     private CaptureDeviceInfo? _captureDevice;
@@ -92,7 +92,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RunCommand = new RelayCommand(RunAsync, () => !_busy && _isLoaded);
         SaveWavCommand = new RelayCommand(SaveWavAsync, () => !_busy && _outputSamples is { Length: > 0 });
         CancelCommand = new RelayCommand(
-            CancelAsync, () => _busy && _cancel is not null && _runInterruptible);
+            CancelAsync, () => _busy && _cancel is not null && _cancellable);
 
         // Present before any model is loaded, as the web UI's are. Counts fill in
         // on load; an empty row would read as a broken layout rather than an
@@ -147,8 +147,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// saying so tells the user what to change -- segment the audio, or split
     /// the text -- rather than leaving them to wait it out.
     /// </remarks>
-    public string CancelHint => _runInterruptible
-        ? "Stops after the piece the engine is working on."
+    public string CancelHint => _cancellable
+        ? "Stops at the next point the work can be interrupted."
         : _busy
             ? "This run is one call into the engine, which has no way to stop part-way. "
               + "Segmenting the audio with a VAD model, or splitting long text, gives it "
@@ -989,7 +989,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // interrupted -- and a Cancel button that silently does nothing is
         // worse than one that is visibly unavailable, because the user waits
         // instead of switching to a smaller model or another backend.
-        _runInterruptible = Task == "tts"
+        _cancellable = Task == "tts"
             ? SplitLongText && TextChunker.Split(Text, Math.Max(1, ChunkBudget)).Count > 1
             : _vadModel is not null;
         Notify(nameof(CancelHint));
@@ -1200,7 +1200,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Busy = false;
             _cancel?.Dispose();
             _cancel = null;
-            _runInterruptible = false;
+            _cancellable = false;
             Notify(nameof(CancelHint));
             CancelCommand.RaiseCanExecuteChanged();
             SaveWavCommand.RaiseCanExecuteChanged();
@@ -1456,6 +1456,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Busy = true;
         InstallFraction = 0;
         _cancel = new CancellationTokenSource();
+        // An HTTP download has a cancellation point on every chunk, so unlike a
+        // run this is always interruptible. The Cancel button is shared, and
+        // gating it on the run's shape alone would have disabled it here.
+        _cancellable = true;
+        Notify(nameof(CancelHint));
         CancelCommand.RaiseCanExecuteChanged();
         try
         {
@@ -1503,6 +1508,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             _cancel?.Dispose();
             _cancel = null;
+            _cancellable = false;
+            Notify(nameof(CancelHint));
+            CancelCommand.RaiseCanExecuteChanged();
             InstallFraction = 0;
             Busy = false;
             InstallCommand.RaiseCanExecuteChanged();

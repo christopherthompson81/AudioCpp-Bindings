@@ -188,6 +188,7 @@ internal static class LiveCheck
                                 .FirstOrDefault(d => d.Index == int.Parse(parts[1]));
                             break;
                         case "audio": viewModel.AudioPath = parts[1]; break;
+                        case "modelsRoot": viewModel.ModelsRoot = parts[1]; break;
                     }
                 }
 
@@ -350,6 +351,62 @@ internal static class LiveCheck
                             Console.Error.WriteLine("cancelled run produced as much as a full one");
                             failures++;
                         }
+                    }
+
+                    // The Cancel button is shared with the installer, and a
+                    // download is always interruptible -- gating the button on
+                    // the run's shape alone disabled it there, which is a
+                    // regression this catches. Needs a package that actually
+                    // downloads; where one is not given, say so rather than
+                    // passing on a condition that was never staged.
+                    if (args.FirstOrDefault(a => a.StartsWith("package="))?["package=".Length..]
+                        is { } package)
+                    {
+                        if (args.FirstOrDefault(a => a.StartsWith("packageTask="))?["packageTask=".Length..]
+                            is { } packageTask)
+                        {
+                            viewModel.Task = packageTask;   // the catalogue is task-filtered
+                            await Task.Delay(200);
+                        }
+                        viewModel.SelectedEntry = viewModel.CatalogEntries
+                            .FirstOrDefault(e => e.Title.Contains(package, StringComparison.OrdinalIgnoreCase));
+                        Console.WriteLine($"package: {viewModel.SelectedEntry?.Title ?? "(none)"}");
+
+                        if (viewModel.SelectedEntry is null)
+                        {
+                            Console.Error.WriteLine($"  no catalog entry matches '{package}'; "
+                                                    + $"{viewModel.CatalogEntries.Count} entries, e.g.");
+                            foreach (var e in viewModel.CatalogEntries.Take(8))
+                                Console.Error.WriteLine($"    {e.Title}");
+                            failures++;
+                        }
+                        else
+                        {
+                            var install = viewModel.InstallCommand.ExecuteAsync();
+                            await Task.Delay(2500);
+                            var running = viewModel.Busy;
+                            Console.WriteLine($"installing: running={running} "
+                                              + $"cancel enabled={viewModel.CancelCommand.CanExecute(null)}");
+                            if (!running)
+                            {
+                                Console.WriteLine("  install finished before it could be cancelled; "
+                                                  + "not a download, so this says nothing either way");
+                            }
+                            else if (!viewModel.CancelCommand.CanExecute(null))
+                            {
+                                Console.Error.WriteLine("cancel unavailable during a download"); failures++;
+                            }
+                            else
+                            {
+                                await viewModel.CancelCommand.ExecuteAsync();
+                            }
+                            await install;
+                            Console.WriteLine($"  after: {viewModel.InstallStatus}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("install cancel not checked; pass package=<title fragment>");
                     }
 
                     Console.WriteLine($"after the run: cancel enabled={viewModel.CancelCommand.CanExecute(null)}");
