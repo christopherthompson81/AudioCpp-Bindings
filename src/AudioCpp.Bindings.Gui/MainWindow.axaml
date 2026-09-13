@@ -27,14 +27,14 @@
           </Border>
           <StackPanel VerticalAlignment="Center">
             <TextBlock Text="audio.cpp" Classes="Title" FontSize="15" />
-            <TextBlock Text="{Binding [app.subtitle], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+            <TextBlock Text="{Binding [app.nativeStudio], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
           </StackPanel>
         </StackPanel>
 
         <!-- Horizontal explicitly: the Chips class panels with a WrapPanel for
              the task row, which stacks these two and doubles the bar's height. -->
         <ListBox Grid.Column="2" Classes="Chips" ItemsSource="{Binding Pages}"
-                 SelectedItem="{Binding Page}" Background="Transparent"
+                 SelectedItem="{Binding SelectedPage}" Background="Transparent"
                  BorderThickness="0" Padding="0" VerticalAlignment="Center">
           <ListBox.ItemsPanel>
             <ItemsPanelTemplate>
@@ -45,10 +45,13 @@
 
         <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="14"
                     VerticalAlignment="Center">
-          <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding Language}" MinWidth="140" />
-          <TextBlock Text="{Binding [theme.label], Source={x:Static res:Loc.Current}}"
+          <TextBlock Text="{Binding [language.label], Source={x:Static res:Loc.Current},
+                            Converter={x:Static res:Upper.Instance}}"
                      Classes="Eyebrow" VerticalAlignment="Center" />
-          <ComboBox ItemsSource="{Binding Themes}" SelectedItem="{Binding Theme}" MinWidth="96" />
+          <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding Language}" MinWidth="140" />
+          <TextBlock Text="{Binding [theme.label], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}"
+                     Classes="Eyebrow" VerticalAlignment="Center" />
+          <ComboBox ItemsSource="{Binding Themes}" SelectedItem="{Binding SelectedTheme}" MinWidth="96" />
           <TextBlock Text="{Binding AbiVersion}" Classes="Subtle" VerticalAlignment="Center" />
           <Border Background="{DynamicResource AppChip}" BorderBrush="{DynamicResource AppLine}"
                   BorderThickness="1" CornerRadius="20" Padding="12,5">
@@ -75,15 +78,15 @@
     <ScrollViewer Padding="20,16" IsVisible="{Binding IsRuntime}">
       <StackPanel Spacing="16">
         <StackPanel Spacing="4">
-          <TextBlock Text="RUNTIME" Classes="Eyebrow" Foreground="{DynamicResource AppAccent}" />
-          <TextBlock Text="Session log" Classes="Hero" />
+          <TextBlock Text="{Binding [runtime.eyebrow], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" Foreground="{DynamicResource AppAccent}" />
+          <TextBlock Text="{Binding [runtime.title], Source={x:Static res:Loc.Current}}" Classes="Hero" />
           <TextBlock Classes="Subtle" FontSize="13"
                      Text="What this app asked the ABI to do, in order. The status line keeps only the last thing that happened." />
         </StackPanel>
 
         <Border Classes="Card">
           <StackPanel Spacing="8">
-            <TextBlock Text="{Binding [section.state], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+            <TextBlock Text="{Binding [section.state], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
             <TextBlock Text="{Binding RuntimeSummary}" Classes="Subtle" FontFamily="monospace"
                        FontSize="12" TextWrapping="Wrap" />
           </StackPanel>
@@ -91,7 +94,7 @@
 
         <Border Classes="Card">
           <StackPanel Spacing="8">
-            <TextBlock Text="{Binding [section.events], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+            <TextBlock Text="{Binding [section.events], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
             <DataGrid ItemsSource="{Binding SessionLog}" IsReadOnly="True" Height="420"
                       GridLinesVisibility="Horizontal">
               <DataGrid.Columns>
@@ -108,8 +111,8 @@
     <ScrollViewer Padding="20,16" IsVisible="{Binding IsArena}">
       <StackPanel Spacing="16" DataContext="{Binding Arena}">
         <StackPanel Spacing="4">
-          <TextBlock Text="COMPARE" Classes="Eyebrow" Foreground="{DynamicResource AppAccent}" />
-          <TextBlock Text="Arena" Classes="Hero" />
+          <TextBlock Text="{Binding [arena.eyebrow], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" Foreground="{DynamicResource AppAccent}" />
+          <TextBlock Text="{Binding [nav.arena], Source={x:Static res:Loc.Current}}" Classes="Hero" />
           <TextBlock Classes="Subtle" FontSize="13"
                      Text="Two configurations, one input. Which quantisation, backend or family is good enough to use." />
         </StackPanel>
@@ -129,9 +132,9 @@
               <TextBlock Text="{Binding Status}" Classes="Subtle" FontSize="11" TextWrapping="Wrap" />
               <TextBlock Text="{Binding Timing}" Classes="Subtle" FontSize="11" />
               <StackPanel Orientation="Horizontal" Spacing="6">
-                <Button Content="Unload"
+                <Button Content="{Binding [action.unload], Source={x:Static res:Loc.Current}}"
                         Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).UnloadLeftCommand}" />
-                <Button Content="Play"
+                <Button Content="{Binding [action.play], Source={x:Static res:Loc.Current}}"
                         Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).PlayLeftCommand}" />
               </StackPanel>
             </StackPanel>
@@ -151,9 +154,9 @@
               <TextBlock Text="{Binding Status}" Classes="Subtle" FontSize="11" TextWrapping="Wrap" />
               <TextBlock Text="{Binding Timing}" Classes="Subtle" FontSize="11" />
               <StackPanel Orientation="Horizontal" Spacing="6">
-                <Button Content="Unload"
+                <Button Content="{Binding [action.unload], Source={x:Static res:Loc.Current}}"
                         Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).UnloadRightCommand}" />
-                <Button Content="Play"
+                <Button Content="{Binding [action.play], Source={x:Static res:Loc.Current}}"
                         Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).PlayRightCommand}" />
               </StackPanel>
             </StackPanel>
@@ -162,7 +165,7 @@
 
         <Border Classes="Card">
           <StackPanel Spacing="10">
-            <TextBlock Text="{Binding [section.input], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+            <TextBlock Text="{Binding [arena.input.label], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
             <Grid ColumnDefinitions="Auto,10,*">
               <ComboBox Grid.Column="0" ItemsSource="{Binding Tasks}" SelectedItem="{Binding Task}" />
               <TextBox Grid.Column="2" Text="{Binding AudioPath}" PlaceholderText="input WAV" />
@@ -179,7 +182,7 @@
 
         <Border Classes="Card">
           <StackPanel Spacing="10">
-            <TextBlock Text="{Binding [section.result], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+            <TextBlock Text="{Binding [result.label], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
             <TextBlock Text="{Binding Summary}" Classes="Title" FontSize="15" />
             <TextBlock Classes="Subtle" FontSize="11"
                        Text="Muted where both agree; each side's own words stand out." />
@@ -233,7 +236,7 @@
         <!-- Hero -->
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Grid.Column="0" Spacing="4">
-            <TextBlock Text="{Binding [studio.eyebrow], Source={x:Static res:Loc.Current}}" Classes="Eyebrow"
+            <TextBlock Text="{Binding [studio.eyebrow], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow"
                        Foreground="{DynamicResource AppAccent}" />
             <TextBlock Text="{Binding TaskTitle}" Classes="Hero" />
             <TextBlock Text="{Binding TaskBlurb}" Classes="Subtle" FontSize="13" />
@@ -242,7 +245,7 @@
           <Border Grid.Column="1" Classes="Card" Padding="18,14" MinWidth="300"
                   VerticalAlignment="Top">
             <StackPanel Spacing="3">
-              <TextBlock Text="{Binding [section.model], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+              <TextBlock Text="{Binding [studio.model], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
               <TextBlock Text="{Binding LoadedModelName}" Classes="Title" FontSize="15" />
               <TextBlock Text="{Binding LoadedModelState}" Classes="Eyebrow"
                          Foreground="{DynamicResource AppAccent}" />
@@ -259,7 +262,7 @@
 
           <Border Grid.Column="0" Classes="Card" VerticalAlignment="Top">
             <StackPanel Spacing="10">
-              <TextBlock Text="{Binding [section.model], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+              <TextBlock Text="{Binding [studio.model], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
 
               <!-- The package picker the reference UI leads with. Falls back to
                    the path box below, which still takes anything on disk. -->
@@ -285,7 +288,7 @@
                              TextWrapping="Wrap" />
                   <StackPanel Orientation="Horizontal" Spacing="6">
                     <Button Content="{Binding [action.install], Source={x:Static res:Loc.Current}}" Command="{Binding InstallCommand}" />
-                    <Button Content="{Binding [action.delete], Source={x:Static res:Loc.Current}}" Command="{Binding DeleteCommand}" />
+                    <Button Content="{Binding [common.delete], Source={x:Static res:Loc.Current}}" Command="{Binding DeleteCommand}" />
                   </StackPanel>
                   <ProgressBar Value="{Binding InstallFraction}" Minimum="0" Maximum="1"
                                Height="4" IsVisible="{Binding Busy}" />
@@ -303,13 +306,13 @@
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Button Content="File…" Click="OnPickModelFile" />
                 <Button Content="Folder…" Click="OnPickModelFolder" />
-                <Button Content="Load" Command="{Binding LoadCommand}" />
+                <Button Content="{Binding [action.load], Source={x:Static res:Loc.Current}}" Command="{Binding LoadCommand}" />
               </StackPanel>
               <TextBox Text="{Binding FamilyHint}" PlaceholderText="family hint (optional)" />
 
               <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,4" />
 
-              <TextBlock Text="{Binding [section.session], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+              <TextBlock Text="{Binding [section.session], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
               <Grid ColumnDefinitions="*,8,*">
                 <ComboBox Grid.Column="0" ItemsSource="{Binding Backends}"
                           SelectedItem="{Binding Backend}" HorizontalAlignment="Stretch" />
@@ -320,7 +323,7 @@
               <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,4" />
 
               <StackPanel Spacing="10" IsVisible="{Binding ShowAsrAudioControls}">
-              <TextBlock Text="{Binding [section.longAudio], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+              <TextBlock Text="{Binding [section.longAudio], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
               <CheckBox IsChecked="{Binding UseBuiltInChunking}"
                         IsEnabled="{Binding !HasVadModel}"
                         Content="{Binding [label.builtInChunking], Source={x:Static res:Loc.Current}}" />
@@ -352,7 +355,7 @@
             <StackPanel Spacing="10">
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel Grid.Column="0" Spacing="2">
-                  <TextBlock Text="{Binding [section.request], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+                  <TextBlock Text="{Binding [request.label], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
                   <TextBlock Text="{Binding [request.title], Source={x:Static res:Loc.Current}}" Classes="Title" />
                 </StackPanel>
                 <Border Grid.Column="1" Background="{DynamicResource AppChip}"
@@ -363,21 +366,24 @@
               </Grid>
 
               <StackPanel Spacing="10" IsVisible="{Binding ShowText}">
-                <TextBlock Text="{Binding [label.text], Source={x:Static res:Loc.Current}}" Classes="Label" />
+                <TextBlock Text="{Binding [request.text], Source={x:Static res:Loc.Current}}" Classes="Label" />
                 <TextBox Text="{Binding Text}" AcceptsReturn="True" Height="110"
-                         TextWrapping="Wrap" PlaceholderText="Enter the text…" />
+                         TextWrapping="Wrap" PlaceholderText="{Binding [request.textPlaceholder], Source={x:Static res:Loc.Current}}" />
               </StackPanel>
 
-              <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowTextChunking}">
-                <CheckBox Grid.Column="0" IsChecked="{Binding SplitLongText}"
-                          Content="{Binding [label.splitLongText], Source={x:Static res:Loc.Current}}" VerticalAlignment="Center" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+              <!-- A WrapPanel, not two grid columns: "Split and merge long text"
+                   is three words longer in Russian, and a fixed split wrapped it
+                   to three lines while the spinner kept its width. -->
+              <WrapPanel Orientation="Horizontal" IsVisible="{Binding ShowTextChunking}">
+                <CheckBox IsChecked="{Binding SplitLongText}" Margin="0,0,12,0"
+                          Content="{Binding [request.splitLongText], Source={x:Static res:Loc.Current}}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" Spacing="8"
                             IsEnabled="{Binding SplitLongText}">
-                  <TextBlock Text="{Binding [label.charsPerChunk], Source={x:Static res:Loc.Current}}" Classes="Subtle" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding [request.charactersPerChunk], Source={x:Static res:Loc.Current}}" Classes="Subtle" VerticalAlignment="Center" />
                   <NumericUpDown Value="{Binding ChunkBudget}" Minimum="1" Maximum="20000"
                                  Increment="100" FormatString="0" Width="130" />
                 </StackPanel>
-              </Grid>
+              </WrapPanel>
 
               <StackPanel Spacing="10" IsVisible="{Binding ShowVoice}">
                 <TextBlock Text="{Binding [label.voiceId], Source={x:Static res:Loc.Current}}" Classes="Label" />
@@ -387,9 +393,9 @@
                      would take a reference clip and ignore it. -->
                 <StackPanel Spacing="10" IsVisible="{Binding SupportsVoiceReference}">
                   <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
-                  <TextBlock Text="{Binding [label.referenceVoice], Source={x:Static res:Loc.Current}}" Classes="Label" />
+                  <TextBlock Text="{Binding [voice.reference], Source={x:Static res:Loc.Current}}" Classes="Label" />
                   <ComboBox ItemsSource="{Binding Voices}" SelectedItem="{Binding SelectedVoice}"
-                            HorizontalAlignment="Stretch" PlaceholderText="saved voices…">
+                            HorizontalAlignment="Stretch" PlaceholderText="{Binding [voice.chooseSaved], Source={x:Static res:Loc.Current}}">
                     <ComboBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:SavedVoice">
                         <StackPanel>
@@ -407,12 +413,12 @@
                        looks like a bad model. -->
                   <TextBox Text="{Binding VoiceTranscript}" AcceptsReturn="True" Height="60"
                            TextWrapping="Wrap"
-                           PlaceholderText="what the reference says (recommended for cloning)" />
+                           PlaceholderText="{Binding [voice.recommendedClone], Source={x:Static res:Loc.Current}}" />
                   <TextBlock Text="{Binding VoiceWarning}" Classes="Subtle" FontSize="11"
                              Foreground="{DynamicResource AppDanger}" TextWrapping="Wrap" />
                   <Grid ColumnDefinitions="*,8,Auto,8,Auto">
-                    <TextBox Grid.Column="0" Text="{Binding VoiceName}" PlaceholderText="library name" />
-                    <Button Grid.Column="2" Content="Save" Command="{Binding SaveVoiceCommand}" />
+                    <TextBox Grid.Column="0" Text="{Binding VoiceName}" PlaceholderText="{Binding [voice.libraryName], Source={x:Static res:Loc.Current}}" />
+                    <Button Grid.Column="2" Content="{Binding [action.save], Source={x:Static res:Loc.Current}}" Command="{Binding SaveVoiceCommand}" />
                     <Button Grid.Column="4" Content="Delete" Command="{Binding DeleteVoiceCommand}" />
                   </Grid>
                   <TextBlock Text="{Binding VoiceLibraryPath}" Classes="Subtle" FontSize="10"
@@ -422,7 +428,7 @@
 
               <StackPanel Spacing="10" IsVisible="{Binding ShowAudioInput}">
                 <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
-                <TextBlock Text="{Binding [label.audioInput], Source={x:Static res:Loc.Current}}" Classes="Label" />
+                <TextBlock Text="{Binding [request.sourceAudio], Source={x:Static res:Loc.Current}}" Classes="Label" />
                 <TextBox Text="{Binding AudioPath}"
                          PlaceholderText="input WAV" />
                 <Button Content="Audio…" Click="OnPickAudio" HorizontalAlignment="Left" />
@@ -530,7 +536,7 @@
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <Button Classes="Primary" Command="{Binding RunCommand}">
                   <StackPanel Orientation="Horizontal" Spacing="9">
-                    <TextBlock Text="{Binding [action.run], Source={x:Static res:Loc.Current}}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding [run.run], Source={x:Static res:Loc.Current}}" VerticalAlignment="Center" />
                     <Border Background="{DynamicResource AppTextInvert}" CornerRadius="4"
                             Padding="5,1" Opacity="0.22">
                       <TextBlock Text="Ctrl ⏎" FontSize="10" VerticalAlignment="Center"
@@ -538,7 +544,7 @@
                     </Border>
                   </StackPanel>
                 </Button>
-                <Button Content="{Binding [action.cancel], Source={x:Static res:Loc.Current}}" Command="{Binding CancelCommand}" />
+                <Button Content="{Binding [common.cancel], Source={x:Static res:Loc.Current}}" Command="{Binding CancelCommand}" />
                 <TextBlock Text="{Binding RunState}" Classes="Subtle"
                            VerticalAlignment="Center" />
               </StackPanel>
@@ -547,7 +553,7 @@
 
           <Border Grid.Column="4" Classes="Card" VerticalAlignment="Top">
             <StackPanel Spacing="10">
-              <TextBlock Text="{Binding [section.result], Source={x:Static res:Loc.Current}}" Classes="Eyebrow" />
+              <TextBlock Text="{Binding [result.label], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
               <TextBlock Text="{Binding [result.title], Source={x:Static res:Loc.Current}}" Classes="Title" />
 
               <TabControl>
@@ -623,7 +629,7 @@
               <TextBlock Text="{Binding TimingBreakdown}" Classes="Subtle" FontSize="11" />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Content="{Binding PlayLabel}" Command="{Binding PlayCommand}" MinWidth="76" />
-                <Button Content="{Binding [action.saveWav], Source={x:Static res:Loc.Current}}" Command="{Binding SaveWavCommand}" />
+                <Button Content="{Binding [result.saveWav], Source={x:Static res:Loc.Current}}" Command="{Binding SaveWavCommand}" />
                 <!-- A transcript with word timings is a subtitle track that has
                      not been cut into lines yet. -->
                 <Button Content="SRT…" Command="{Binding SaveSrtCommand}" />

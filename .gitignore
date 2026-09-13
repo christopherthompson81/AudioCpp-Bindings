@@ -9,3 +9,4 @@ obj/
 *.wav
 tools/perf/reference/*.txt
 native/audioio/build/
+__pycache__/

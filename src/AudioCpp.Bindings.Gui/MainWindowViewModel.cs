@@ -60,7 +60,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _timingBreakdown = "";
     private string _page = "Studio";
     private string _theme = "System";
-    private string _language = "English";
+    private string _language = Resources.Loc.InitialLanguage();
     private readonly VoiceLibrary _voices = new();
     private SavedVoice? _selectedVoice;
     private string _voiceAudioPath = "";
@@ -96,6 +96,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // on load; an empty row would read as a broken layout rather than an
         // unloaded one.
         foreach (var task in Tasks) TaskChips.Add(new TaskChip(task, TitleFor(task), 0));
+        RelabelChoices();
 
         InstallCommand = new RelayCommand(
             InstallAsync, () => !_busy && _selectedEntry is { IsInstalled: false }
@@ -194,7 +195,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    public string RecordLabel => _isRecording ? "Stop" : "Record";
+    public string RecordLabel => _isRecording ? Resources.Strings.Stop : Resources.Strings.Record;
 
     /// <summary>
     /// Something to play: generated output, or the loaded input clip. Output
@@ -202,7 +203,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// </summary>
     public bool HasPreviewAudio => _outputSamples is { Length: > 0 } || _inputClip is not null;
 
-    public string PlayLabel => _player?.IsPlaying == true ? "Pause" : "Play";
+    public string PlayLabel => _player?.IsPlaying == true
+        ? Resources.Strings.Pause : Resources.Strings.Play;
 
     /// <summary>Playhead as a fraction, or negative when there is nothing to show.</summary>
     public double PlayProgress { get => _playProgress; private set => Set(ref _playProgress, value); }
@@ -320,9 +322,47 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Two configurations compared on one input.</summary>
     public Arena Arena { get; } = new();
 
-    public IReadOnlyList<string> Pages { get; } = ["Studio", "Arena", "Runtime"];
+    /// <summary>
+    /// Pages and themes as (identity, label) pairs.
+    /// </summary>
+    /// <remarks>
+    /// The identity is what the rest of the app switches on and what a
+    /// screenshot run passes on the command line; the label is what the chip
+    /// shows, and changes with the language. Keeping them as one string meant
+    /// the nav chips stayed English in every translation, which was the first
+    /// thing visible in a Russian screenshot.
+    /// </remarks>
+    public ObservableCollection<Choice> Pages { get; } =
+        [new("Studio", ""), new("Arena", ""), new("Runtime", "")];
 
-    public IReadOnlyList<string> Themes { get; } = ["System", "Light", "Dark"];
+    public Choice? SelectedPage
+    {
+        get => Pages.FirstOrDefault(p => p.Id == _page);
+        set { if (value is not null) Page = value.Id; }
+    }
+
+    public ObservableCollection<Choice> Themes { get; } =
+        [new("System", ""), new("Light", ""), new("Dark", "")];
+
+    public Choice? SelectedTheme
+    {
+        get => Themes.FirstOrDefault(t => t.Id == _theme);
+        set { if (value is not null) Theme = value.Id; }
+    }
+
+    private void RelabelChoices()
+    {
+        for (var i = 0; i < Pages.Count; i++)
+        {
+            Pages[i] = Pages[i] with { Label = Resources.Strings.Get($"nav.{Pages[i].Id.ToLowerInvariant()}") };
+        }
+        for (var i = 0; i < Themes.Count; i++)
+        {
+            Themes[i] = Themes[i] with { Label = Resources.Strings.Get($"theme.{Themes[i].Id.ToLowerInvariant()}") };
+        }
+        Notify(nameof(SelectedPage));
+        Notify(nameof(SelectedTheme));
+    }
 
     public IReadOnlyList<string> Languages => Resources.Loc.Available;
 
@@ -342,6 +382,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(TaskTitle));
             Notify(nameof(TaskBlurb));
             RebuildTaskChips();
+            RelabelChoices();
+            // Both toggle between two resource strings, so neither is reached by
+            // the indexer refresh that covers the XAML bindings.
+            Notify(nameof(PlayLabel));
+            Notify(nameof(RecordLabel));
         }
     }
 
@@ -418,6 +463,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         set
         {
             if (!Set(ref _theme, value)) return;
+            Notify(nameof(SelectedTheme));
             ApplyTheme();
         }
     }
@@ -448,6 +494,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(IsStudio));
             Notify(nameof(IsArena));
             Notify(nameof(IsRuntime));
+            Notify(nameof(SelectedPage));
             Notify(nameof(RuntimeSummary));
         }
     }
@@ -2216,3 +2263,13 @@ public readonly record struct ResultRow(
 /// <summary>One entry in the task selector: a display title and how many of the
 /// loaded model's tasks it covers.</summary>
 public sealed record TaskChip(string Task, string Title, int Count);
+
+/// <summary>An option whose stable identity and shown label differ.</summary>
+/// <remarks>
+/// ToString is overridden because a ComboBox renders its items with it, and a
+/// record's generated ToString would put the whole record in the drop-down.
+/// </remarks>
+public sealed record Choice(string Id, string Label)
+{
+    public override string ToString() => Label;
+}

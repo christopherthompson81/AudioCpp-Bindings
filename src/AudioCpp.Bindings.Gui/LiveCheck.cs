@@ -245,7 +245,18 @@ internal static class LiveCheck
 
                     if (args.FirstOrDefault(a => a.StartsWith("lang="))?["lang=".Length..] is { } lang)
                     {
-                        viewModel.Language = lang == "pseudo" ? "Pseudo (qps-ploc)" : "English";
+                        // Accept either the display name as the selector shows
+                        // it, or a shorthand, so a screenshot run can say lang=ru.
+                        viewModel.Language = lang switch
+                        {
+                            "pseudo" => "Pseudo (qps-ploc)",
+                            "it" => "Italiano",
+                            "pl" => "Polski",
+                            "ru" => "Русский",
+                            "zh" => "中文",
+                            "en" => "English",
+                            _ => viewModel.Languages.Contains(lang) ? lang : "English",
+                        };
                         await Task.Delay(400);
                         Console.WriteLine($"language: {viewModel.Language}  "
                                           + $"task title now '{viewModel.TaskTitle}'");
@@ -276,9 +287,12 @@ internal static class LiveCheck
 
                 if (args.Contains("--strings-check"))
                 {
-                    var keys = new[] { "action.run", "task.asr.title", "section.request",
-                                       "label.splitLongText", "nav.arena" };
-                    foreach (var culture in new[] { "en", "qps-ploc" })
+                    // One key from each area, plus one of ours that upstream
+                    // has no equivalent for.
+                    var keys = new[] { "run.run", "task.asr", "request.label",
+                                       "request.splitLongText", "nav.arena", "section.events" };
+                    var cultures = new[] { "en", "it", "pl", "ru", "zh", "qps-ploc" };
+                    foreach (var culture in cultures)
                     {
                         Resources.Strings.Culture = new System.Globalization.CultureInfo(culture);
                         var rendered = keys.Select(Resources.Strings.Get).ToList();
@@ -286,6 +300,8 @@ internal static class LiveCheck
 
                         // A key coming back as itself means the resource is missing,
                         // which is what an unextracted or mistyped key looks like.
+                        // An untranslated key is a different thing: it resolves to
+                        // the English, because ResourceManager walks up to neutral.
                         var missing = keys.Where((k, i) => rendered[i] == k).ToList();
                         if (missing.Count > 0)
                         {
@@ -293,6 +309,63 @@ internal static class LiveCheck
                             failures++;
                         }
                     }
+
+                    // Every key the app can ask for, in every language, so a key
+                    // that exists in no resource file at all cannot hide behind
+                    // the handful sampled above.
+                    var all = new System.Resources.ResourceManager(
+                        "AudioCpp.Bindings.Gui.Resources.Strings", typeof(Resources.Strings).Assembly);
+                    var english = all.GetResourceSet(new System.Globalization.CultureInfo("en"), true, true)!
+                        .Cast<System.Collections.DictionaryEntry>()
+                        .Select(e => (string)e.Key).OrderBy(k => k).ToList();
+                    Console.WriteLine($"{english.Count} keys declared");
+
+                    foreach (var culture in cultures.Where(c => c != "en"))
+                    {
+                        // Ask the satellite itself rather than comparing rendered
+                        // text: "Arena" is "Arena" in Italian, and counting that
+                        // as untranslated understates the coverage.
+                        var set = all.GetResourceSet(new System.Globalization.CultureInfo(culture), true, false);
+                        var present = set is null
+                            ? []
+                            : set.Cast<System.Collections.DictionaryEntry>()
+                                 .Select(e => (string)e.Key).ToHashSet();
+                        var same = present.Count(k => all.GetString(k, new System.Globalization.CultureInfo(culture))
+                                                   == all.GetString(k, new System.Globalization.CultureInfo("en")));
+                        Console.WriteLine($"  {culture,-9} {present.Count,3} translated "
+                                          + $"({same} the same word as English), "
+                                          + $"{english.Count - present.Count,3} fall back to English");
+
+                        // A satellite key the neutral file does not declare is a
+                        // string nothing can ask for -- a rename that only landed
+                        // on one side.
+                        var orphans = present.Except(english).ToList();
+                        if (orphans.Count > 0)
+                        {
+                            Console.Error.WriteLine($"  {culture}: not in neutral: {string.Join(", ", orphans)}");
+                            failures++;
+                        }
+                    }
+
+                    // The selector has to open on the language actually being
+                    // rendered. It did not: an Italian machine showed an Italian
+                    // window with "English" selected, and picking English was a
+                    // no-op because it was already the selection.
+                    var started = System.Globalization.CultureInfo.CurrentUICulture;
+                    foreach (var (machine, expected) in new[]
+                             { ("it-IT", "Italiano"), ("zh-CN", "中文"), ("ru", "Русский"),
+                               ("de-DE", "English"), ("en-CA", "English") })
+                    {
+                        System.Globalization.CultureInfo.CurrentUICulture =
+                            new System.Globalization.CultureInfo(machine);
+                        var opens = Resources.Loc.InitialLanguage();
+                        Console.WriteLine($"  machine {machine,-6} -> selector {opens}");
+                        if (opens != expected)
+                        {
+                            Console.Error.WriteLine($"  expected {expected}"); failures++;
+                        }
+                    }
+                    System.Globalization.CultureInfo.CurrentUICulture = started;
 
                     Resources.Strings.Culture = new System.Globalization.CultureInfo("en");
                     Console.WriteLine($"missing key falls back to itself: "

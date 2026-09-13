@@ -1,4 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  User-facing text for the GUI.
+
+  Keys shared with the audio.cpp web UI keep upstream's name and upstream's
+  exact English, so tools/locales/import_webui_locales.py can carry that key's
+  translations over. Changing the English of one of those keys without changing
+  it upstream makes the import fail, on purpose — a translation of text we no
+  longer show is worse than no translation.
+
+  Keys that are ours alone are named for where they appear, and stay English in
+  every language until someone supplies a translation.
+-->
 <root>
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:element name="root" msdata:IsDataSet="true">
@@ -29,59 +41,202 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
-  <data name="app.subtitle" xml:space="preserve"><value>NATIVE STUDIO</value></data>
-  <data name="nav.studio" xml:space="preserve"><value>Studio</value></data>
-  <data name="nav.arena" xml:space="preserve"><value>Arena</value></data>
-  <data name="nav.runtime" xml:space="preserve"><value>Runtime</value></data>
-  <data name="theme.label" xml:space="preserve"><value>THEME</value></data>
-  <data name="section.model" xml:space="preserve"><value>MODEL</value></data>
-  <data name="section.session" xml:space="preserve"><value>SESSION</value></data>
-  <data name="section.longAudio" xml:space="preserve"><value>LONG AUDIO</value></data>
-  <data name="section.request" xml:space="preserve"><value>REQUEST</value></data>
-  <data name="section.result" xml:space="preserve"><value>RESULT</value></data>
-  <data name="section.input" xml:space="preserve"><value>INPUT</value></data>
-  <data name="section.state" xml:space="preserve"><value>STATE</value></data>
-  <data name="section.events" xml:space="preserve"><value>EVENTS</value></data>
-  <data name="request.title" xml:space="preserve"><value>Input &amp; controls</value></data>
-  <data name="result.title" xml:space="preserve"><value>Output</value></data>
-  <data name="studio.eyebrow" xml:space="preserve"><value>LOCAL AUDIO INTELLIGENCE</value></data>
-  <data name="action.run" xml:space="preserve"><value>Run</value></data>
-  <data name="action.cancel" xml:space="preserve"><value>Cancel</value></data>
-  <data name="action.load" xml:space="preserve"><value>Load</value></data>
-  <data name="action.unload" xml:space="preserve"><value>Unload</value></data>
-  <data name="action.install" xml:space="preserve"><value>Install</value></data>
-  <data name="action.delete" xml:space="preserve"><value>Delete</value></data>
-  <data name="action.save" xml:space="preserve"><value>Save</value></data>
-  <data name="action.play" xml:space="preserve"><value>Play</value></data>
-  <data name="action.pause" xml:space="preserve"><value>Pause</value></data>
-  <data name="action.record" xml:space="preserve"><value>Record</value></data>
-  <data name="action.stop" xml:space="preserve"><value>Stop</value></data>
-  <data name="action.compare" xml:space="preserve"><value>Compare</value></data>
-  <data name="action.saveWav" xml:space="preserve"><value>Save WAV…</value></data>
-  <data name="label.text" xml:space="preserve"><value>Text</value></data>
-  <data name="label.voiceId" xml:space="preserve"><value>Voice id</value></data>
-  <data name="label.audioInput" xml:space="preserve"><value>Audio input</value></data>
-  <data name="label.microphone" xml:space="preserve"><value>Microphone</value></data>
-  <data name="label.referenceVoice" xml:space="preserve"><value>Reference voice</value></data>
-  <data name="label.splitLongText" xml:space="preserve"><value>Split and merge long text</value></data>
-  <data name="label.charsPerChunk" xml:space="preserve"><value>chars per chunk</value></data>
-  <data name="label.builtInChunking" xml:space="preserve"><value>Built-in chunking (clips over 5 min)</value></data>
-  <data name="task.asr.title" xml:space="preserve"><value>Transcription</value></data>
-  <data name="task.asr.blurb" xml:space="preserve"><value>Transcribe spoken audio into text, with language and timestamp controls when supported.</value></data>
-  <data name="task.asr.chip" xml:space="preserve"><value>ASR / Transcription</value></data>
-  <data name="task.tts.title" xml:space="preserve"><value>Text to speech</value></data>
-  <data name="task.tts.blurb" xml:space="preserve"><value>Generate speech from text, with voice presets and cloning when supported.</value></data>
-  <data name="task.tts.chip" xml:space="preserve"><value>Text to speech</value></data>
-  <data name="task.vad.title" xml:space="preserve"><value>Voice activity</value></data>
-  <data name="task.vad.blurb" xml:space="preserve"><value>Find the stretches of a recording that contain speech.</value></data>
-  <data name="task.vad.chip" xml:space="preserve"><value>Voice activity</value></data>
-  <data name="task.diar.title" xml:space="preserve"><value>Diarisation</value></data>
-  <data name="task.diar.blurb" xml:space="preserve"><value>Attribute speech to speakers across a recording.</value></data>
-  <data name="task.diar.chip" xml:space="preserve"><value>Diarisation</value></data>
-  <data name="task.sep.title" xml:space="preserve"><value>Source separation</value></data>
-  <data name="task.sep.blurb" xml:space="preserve"><value>Split a mixture into its constituent sources.</value></data>
-  <data name="task.sep.chip" xml:space="preserve"><value>Source separation</value></data>
-  <data name="task.align.title" xml:space="preserve"><value>Forced alignment</value></data>
-  <data name="task.align.blurb" xml:space="preserve"><value>Align a known transcript to the audio it was spoken in.</value></data>
-  <data name="task.align.chip" xml:space="preserve"><value>Forced alignment</value></data>
+
+  <!-- Chrome. -->
+  <data name="app.nativeStudio" xml:space="preserve">
+    <value>Native Studio</value>
+  </data>
+  <data name="nav.studio" xml:space="preserve">
+    <value>Studio</value>
+  </data>
+  <data name="nav.arena" xml:space="preserve">
+    <value>Arena</value>
+  </data>
+  <data name="nav.runtime" xml:space="preserve">
+    <value>Runtime</value>
+  </data>
+  <data name="language.label" xml:space="preserve">
+    <value>Interface language</value>
+  </data>
+  <data name="theme.label" xml:space="preserve">
+    <value>Theme</value>
+  </data>
+  <data name="theme.system" xml:space="preserve">
+    <value>System</value>
+  </data>
+  <data name="theme.light" xml:space="preserve">
+    <value>Light</value>
+  </data>
+  <data name="theme.dark" xml:space="preserve">
+    <value>Dark</value>
+  </data>
+  <!-- Section eyebrows. -->
+  <data name="studio.model" xml:space="preserve">
+    <value>Model</value>
+  </data>
+  <data name="section.session" xml:space="preserve">
+    <value>SESSION</value>
+  </data>
+  <data name="section.longAudio" xml:space="preserve">
+    <value>LONG AUDIO</value>
+  </data>
+  <data name="request.label" xml:space="preserve">
+    <value>REQUEST</value>
+  </data>
+  <data name="result.label" xml:space="preserve">
+    <value>RESULT</value>
+  </data>
+  <data name="arena.input.label" xml:space="preserve">
+    <value>Input</value>
+  </data>
+  <data name="section.state" xml:space="preserve">
+    <value>STATE</value>
+  </data>
+  <data name="section.events" xml:space="preserve">
+    <value>EVENTS</value>
+  </data>
+  <!-- Page headings. -->
+  <data name="studio.eyebrow" xml:space="preserve">
+    <value>LOCAL AUDIO INTELLIGENCE</value>
+  </data>
+  <data name="request.title" xml:space="preserve">
+    <value>Input &amp; controls</value>
+  </data>
+  <data name="result.title" xml:space="preserve">
+    <value>Output</value>
+  </data>
+  <data name="runtime.eyebrow" xml:space="preserve">
+    <value>RUNTIME</value>
+  </data>
+  <data name="runtime.title" xml:space="preserve">
+    <value>Session log</value>
+  </data>
+  <data name="arena.eyebrow" xml:space="preserve">
+    <value>ARENA</value>
+  </data>
+  <!-- Buttons. -->
+  <data name="run.run" xml:space="preserve">
+    <value>Run</value>
+  </data>
+  <data name="common.cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="common.delete" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="result.saveWav" xml:space="preserve">
+    <value>Save WAV</value>
+  </data>
+  <data name="action.load" xml:space="preserve">
+    <value>Load</value>
+  </data>
+  <data name="action.unload" xml:space="preserve">
+    <value>Unload</value>
+  </data>
+  <data name="action.install" xml:space="preserve">
+    <value>Install</value>
+  </data>
+  <data name="action.save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="action.play" xml:space="preserve">
+    <value>Play</value>
+  </data>
+  <data name="action.pause" xml:space="preserve">
+    <value>Pause</value>
+  </data>
+  <data name="action.record" xml:space="preserve">
+    <value>Record</value>
+  </data>
+  <data name="action.stop" xml:space="preserve">
+    <value>Stop</value>
+  </data>
+  <data name="action.compare" xml:space="preserve">
+    <value>Compare</value>
+  </data>
+  <!-- Input labels. -->
+  <data name="request.text" xml:space="preserve">
+    <value>Text</value>
+  </data>
+  <data name="request.textPlaceholder" xml:space="preserve">
+    <value>Enter the text…</value>
+  </data>
+  <data name="request.splitLongText" xml:space="preserve">
+    <value>Split and merge long text</value>
+  </data>
+  <data name="request.charactersPerChunk" xml:space="preserve">
+    <value>Characters per chunk</value>
+  </data>
+  <data name="request.sourceAudio" xml:space="preserve">
+    <value>Source audio</value>
+  </data>
+  <data name="voice.reference" xml:space="preserve">
+    <value>Reference voice</value>
+  </data>
+  <data name="voice.recommendedClone" xml:space="preserve">
+    <value>recommended for cloning</value>
+  </data>
+  <data name="voice.libraryName" xml:space="preserve">
+    <value>Library name</value>
+  </data>
+  <data name="voice.chooseSaved" xml:space="preserve">
+    <value>Choose a saved voice...</value>
+  </data>
+  <data name="label.voiceId" xml:space="preserve">
+    <value>Voice id</value>
+  </data>
+  <data name="label.microphone" xml:space="preserve">
+    <value>Microphone</value>
+  </data>
+  <data name="label.builtInChunking" xml:space="preserve">
+    <value>Built-in chunking (clips over 5 min)</value>
+  </data>
+  <!-- Task names. -->
+  <data name="task.asr" xml:space="preserve">
+    <value>Transcription</value>
+  </data>
+  <data name="task.tts" xml:space="preserve">
+    <value>Text to speech</value>
+  </data>
+  <data name="task.vad" xml:space="preserve">
+    <value>Voice activity</value>
+  </data>
+  <data name="task.diar" xml:space="preserve">
+    <value>Speaker diarization</value>
+  </data>
+  <data name="task.sep" xml:space="preserve">
+    <value>Source separation</value>
+  </data>
+  <data name="task.align" xml:space="preserve">
+    <value>Forced alignment</value>
+  </data>
+  <!-- Task blurbs. Upstream writes one per workflow, not one per task, so the three analysis tasks have no upstream equivalent. -->
+  <data name="studio.subtitle.asr" xml:space="preserve">
+    <value>Transcribe spoken audio into text, with language and timestamp controls when supported.</value>
+  </data>
+  <data name="studio.subtitle.tts" xml:space="preserve">
+    <value>Generate natural speech from text, with voice presets and cloning when supported.</value>
+  </data>
+  <data name="studio.subtitle.sep" xml:space="preserve">
+    <value>Split a recording into vocals, instruments, or other available audio stems.</value>
+  </data>
+  <data name="task.vad.blurb" xml:space="preserve">
+    <value>Find the stretches of a recording that contain speech.</value>
+  </data>
+  <data name="task.diar.blurb" xml:space="preserve">
+    <value>Attribute speech to speakers across a recording.</value>
+  </data>
+  <data name="task.align.blurb" xml:space="preserve">
+    <value>Align a known transcript to the audio it was spoken in.</value>
+  </data>
+  <!-- Task chips. The analysis tasks reuse their plain task name. -->
+  <data name="workflow.asr" xml:space="preserve">
+    <value>ASR / Transcription</value>
+  </data>
+  <data name="workflow.tts" xml:space="preserve">
+    <value>Text to speech</value>
+  </data>
+  <data name="workflow.sep" xml:space="preserve">
+    <value>Source separation</value>
+  </data>
 </root>

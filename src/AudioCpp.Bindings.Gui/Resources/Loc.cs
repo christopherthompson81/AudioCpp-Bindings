@@ -7,15 +7,37 @@ namespace AudioCpp.Bindings.Gui.Resources;
 /// Localised text for XAML, through an indexer.
 /// </summary>
 /// <remarks>
-/// An indexer rather than ~55 properties, and a binding rather than x:Static:
-/// x:Static resolves once when the window loads, so a language change would not
-/// reach anything already on screen. Raising PropertyChanged for "Item[]"
-/// re-reads every binding at once, which is how the switch takes effect without
-/// a restart.
+/// An indexer rather than a property per key, and a binding rather than
+/// x:Static: x:Static resolves once when the window loads, so a language change
+/// would not reach anything already on screen. Raising PropertyChanged for the
+/// indexer re-reads every binding at once, which is how the switch takes effect
+/// without a restart.
 /// </remarks>
 public sealed class Loc : INotifyPropertyChanged
 {
     public static Loc Current { get; } = new();
+
+    /// <summary>
+    /// Display name and culture for each language offered, named in that
+    /// language rather than in English — a reader who needs the Russian build
+    /// is not helped by the word "Russian".
+    /// </summary>
+    /// <remarks>
+    /// The four translations come from the audio.cpp web UI, imported by
+    /// tools/locales/import_webui_locales.py, which prints this list when it
+    /// runs. Adding a language upstream means running the importer and adding
+    /// a row here.
+    /// </remarks>
+    private static readonly (string Display, string Culture)[] Translations =
+    [
+        ("English", "en"),
+        ("Italiano", "it"),
+        ("Polski", "pl"),
+        ("Русский", "ru"),
+        ("中文", "zh"),
+    ];
+
+    internal const string PseudoLocale = "Pseudo (qps-ploc)";
 
     /// <summary>
     /// Languages offered in the selector.
@@ -30,7 +52,7 @@ public sealed class Loc : INotifyPropertyChanged
 
     private static IReadOnlyList<string> BuildAvailable()
     {
-        var languages = new List<string> { "English" };
+        var languages = Translations.Select(language => language.Display).ToList();
 #if DEBUG
         languages.Add(PseudoLocale);
 #else
@@ -42,16 +64,38 @@ public sealed class Loc : INotifyPropertyChanged
         return languages;
     }
 
-    internal const string PseudoLocale = "Pseudo (qps-ploc)";
+    /// <summary>
+    /// The language to start in, from the machine's own setting.
+    /// </summary>
+    /// <remarks>
+    /// Strings.Culture starts at CurrentUICulture, so an Italian machine
+    /// renders Italian whatever the selector says. Before there were any
+    /// translations that was invisible; with them, the selector read "English"
+    /// over an Italian window, and picking English changed nothing because it
+    /// was already the selected item. The selector has to start on what is
+    /// actually being shown.
+    ///
+    /// Matched on the language alone: pt-BR and pt-PT are different languages
+    /// to a translator, but a catalogue that only has "pt" should still serve
+    /// both rather than silently falling back to English.
+    /// </remarks>
+    public static string InitialLanguage()
+    {
+        var language = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+        var match = Translations.FirstOrDefault(t => t.Culture == language);
+        return match.Display ?? "English";
+    }
 
     public string this[string key] => Strings.Get(key);
 
     /// <summary>Switch language and refresh everything bound through this.</summary>
     public static void Use(string display)
     {
-        Strings.Culture = display == PseudoLocale
-            ? new CultureInfo("qps-ploc")
-            : new CultureInfo("en");
+        var culture = display == PseudoLocale
+            ? "qps-ploc"
+            : Translations.FirstOrDefault(language => language.Display == display).Culture ?? "en";
+        Strings.Culture = new CultureInfo(culture);
+
         // Both: "Item[]" is the WPF convention for an indexer, and an empty
         // name means "every property", which is what actually reaches Avalonia's
         // indexer bindings. Raising only the first leaves the UI in the old
