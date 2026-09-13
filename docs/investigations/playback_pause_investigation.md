@@ -108,6 +108,26 @@ Negative result worth keeping: the second wrong assumption in this
 investigation was about my own tooling, and both times the cost of checking
 was one command.
 
+## Run 7 — 2026-09-13 18:35 — the corrected assertion had the same race
+
+Reviewing the diff before merging: the new reading was taken immediately after
+`Pause()`, so the in-flight callback could still land between that read and the
+check 200 ms later. Narrow enough that a few dozen runs would not find it, wide
+enough to fail eventually — the same shape as the bug being fixed, which makes
+shipping it circular.
+
+The reading is now taken after a 60 ms settle, which asserts the durable
+property (the position stops moving once paused) rather than sub-callback
+timing. That is the honest contract given the device is deliberately left
+running.
+
+    <2 x 10 runs>
+    -> 0/10, 0/10
+
+Batches of ten rather than thirty: the 30-run loops were being killed as
+"low memory" while 103 GB was available — the detector reads `free`, which is
+low because 94 GB is page cache.
+
 ## Still open
 
 `audioio_player_pause` clears a flag and returns while the device keeps
