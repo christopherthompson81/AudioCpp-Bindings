@@ -249,6 +249,53 @@ internal static class LiveCheck
                     return;
                 }
 
+                if (args.Contains("--voice-check"))
+                {
+                    var library = new VoiceLibrary(System.IO.Path.Combine(
+                        System.IO.Path.GetTempPath(), "audiocpp-voice-check"));
+                    Console.WriteLine($"library: {library.StorePath}");
+
+                    // Round-trip through the file, since persistence is the
+                    // whole point of a library.
+                    var sample = new SavedVoice("check", "/nonexistent/ref.wav", "the words spoken");
+                    library.Save([sample]);
+                    var read = library.Load();
+                    Console.WriteLine($"saved 1, loaded {read.Count}: "
+                                      + $"name='{read.FirstOrDefault().Name}' "
+                                      + $"transcript='{read.FirstOrDefault().Transcript}' "
+                                      + $"exists={read.FirstOrDefault().Exists}");
+                    if (read.Count != 1 || read[0].Name != "check") { Console.Error.WriteLine("round trip failed"); failures++; }
+                    if (read[0].Exists) { Console.Error.WriteLine("a missing file reported as present"); failures++; }
+
+                    // A corrupt library must not stop the app starting.
+                    await File.WriteAllTextAsync(library.StorePath, "{ this is not json");
+                    var recovered = library.Load();
+                    Console.WriteLine($"corrupt library loads as {recovered.Count} voices (expect 0)");
+                    if (recovered.Count != 0) { Console.Error.WriteLine("corrupt library not handled"); failures++; }
+
+                    var demos = VoiceLibrary.DemoVoices();
+                    Console.WriteLine($"demo voices found: {demos.Count}");
+                    foreach (var demo in demos)
+                    {
+                        var words = demo.Transcript.Length > 40 ? demo.Transcript[..40] + "…" : demo.Transcript;
+                        Console.WriteLine($"  {demo.Name}  exists={demo.Exists}  \"{words}\"");
+                    }
+                    if (demos.Count > 0 && demos.Any(d => !d.Exists))
+                    {
+                        Console.Error.WriteLine("a demo voice points at a missing file");
+                        failures++;
+                    }
+
+                    await viewModel.LoadCommand.ExecuteAsync();
+                    Console.WriteLine($"model: {viewModel.LoadedModelName}, "
+                                      + $"supports reference: {viewModel.SupportsVoiceReference}");
+
+                    try { File.Delete(library.StorePath); } catch (IOException) { }
+                    Console.WriteLine(failures == 0 ? "voice library OK" : $"voice library: {failures} failure(s)");
+                    Environment.Exit(failures == 0 ? 0 : 1);
+                    return;
+                }
+
                 if (args.Contains("--arena-check"))
                 {
                     var arena = viewModel.Arena;

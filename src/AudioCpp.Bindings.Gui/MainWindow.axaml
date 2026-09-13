@@ -340,6 +340,40 @@
               <StackPanel Spacing="10" IsVisible="{Binding ShowVoice}">
                 <TextBlock Text="Voice id" Classes="Label" />
                 <TextBox Text="{Binding VoiceId}" PlaceholderText="optional, e.g. af_heart" />
+
+                <!-- Only for families that declare speaker reference; the rest
+                     would take a reference clip and ignore it. -->
+                <StackPanel Spacing="10" IsVisible="{Binding SupportsVoiceReference}">
+                  <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
+                  <TextBlock Text="Reference voice" Classes="Label" />
+                  <ComboBox ItemsSource="{Binding Voices}" SelectedItem="{Binding SelectedVoice}"
+                            HorizontalAlignment="Stretch" PlaceholderText="saved voices…">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:SavedVoice">
+                        <StackPanel>
+                          <TextBlock Text="{Binding Name}" />
+                          <TextBlock Text="{Binding Summary}" Classes="Subtle" FontSize="11"
+                                     TextTrimming="CharacterEllipsis" MaxWidth="320" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <TextBox Text="{Binding VoiceAudioPath}" PlaceholderText="reference WAV" />
+                  <Button Content="Reference…" Click="OnPickVoiceAudio" HorizontalAlignment="Left" />
+                  <!-- Cloning families want the words as well as the audio;
+                       the wrong transcript degrades the result in a way that
+                       looks like a bad model. -->
+                  <TextBox Text="{Binding VoiceTranscript}" AcceptsReturn="True" Height="60"
+                           TextWrapping="Wrap"
+                           PlaceholderText="what the reference says (recommended for cloning)" />
+                  <Grid ColumnDefinitions="*,8,Auto,8,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding VoiceName}" PlaceholderText="library name" />
+                    <Button Grid.Column="2" Content="Save" Command="{Binding SaveVoiceCommand}" />
+                    <Button Grid.Column="4" Content="Delete" Command="{Binding DeleteVoiceCommand}" />
+                  </Grid>
+                  <TextBlock Text="{Binding VoiceLibraryPath}" Classes="Subtle" FontSize="10"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
               </StackPanel>
 
               <StackPanel Spacing="10" IsVisible="{Binding ShowAudioInput}">

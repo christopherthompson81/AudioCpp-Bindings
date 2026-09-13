@@ -19,6 +19,13 @@ public partial class MainWindow : Window
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
+    private async void OnPickVoiceAudio(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel) return;
+        var path = await PickPathAsync("Reference voice", directory: false);
+        if (path is not null) viewModel.VoiceAudioPath = path;
+    }
+
     private async void OnSaveStream(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (sender is Button { Tag: NamedAudioEntry stream }

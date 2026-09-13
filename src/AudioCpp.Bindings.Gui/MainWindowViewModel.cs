@@ -60,6 +60,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _timingBreakdown = "";
     private string _page = "Studio";
     private string _theme = "System";
+    private readonly VoiceLibrary _voices = new();
+    private SavedVoice? _selectedVoice;
+    private string _voiceAudioPath = "";
+    private string _voiceTranscript = "";
+    private string _voiceName = "";
     private string _playStatus = "";
     private string _task = "asr";
     private string _audioPath = "";
@@ -103,6 +108,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         PlayCommand = new RelayCommand(TogglePlaybackAsync, () => HasPreviewAudio);
         UnloadCommand = new RelayCommand(UnloadAsync, () => _isLoaded && !_busy);
+        SaveVoiceCommand = new RelayCommand(SaveVoiceAsync,
+            () => _voiceName.Length > 0 && _voiceAudioPath.Length > 0);
+        DeleteVoiceCommand = new RelayCommand(DeleteVoiceAsync, () => _selectedVoice is not null);
+        // Demo voices first, then the user's own: a library that starts empty
+        // gives no way to try cloning without finding a clip yourself.
+        foreach (var voice in VoiceLibrary.DemoVoices()) Voices.Add(voice);
+        foreach (var voice in _voices.Load()) Voices.Add(voice);
         SaveSrtCommand = new RelayCommand(() => SaveSubtitlesAsync("srt"), () => HasWordTimings);
         SaveVttCommand = new RelayCommand(() => SaveSubtitlesAsync("vtt"), () => HasWordTimings);
 
@@ -310,6 +322,42 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public IReadOnlyList<string> Pages { get; } = ["Studio", "Arena"];
 
     public IReadOnlyList<string> Themes { get; } = ["System", "Light", "Dark"];
+
+    /// <summary>Reference voices kept on disk between sessions.</summary>
+    public ObservableCollection<SavedVoice> Voices { get; } = [];
+
+    /// <summary>
+    /// Whether this family can imitate a reference at all. Asked of the model
+    /// rather than assumed: a third of the families declare speaker reference
+    /// and the rest would silently ignore one.
+    /// </summary>
+    public bool SupportsVoiceReference => _model?.SupportsSpeakerReference ?? false;
+
+    public SavedVoice? SelectedVoice
+    {
+        get => _selectedVoice;
+        set
+        {
+            if (!Set(ref _selectedVoice, value) || value is null) return;
+            VoiceAudioPath = value.AudioPath;
+            VoiceTranscript = value.Transcript;
+            VoiceName = value.Name;
+        }
+    }
+
+    /// <summary>The clip a cloning family should imitate.</summary>
+    public string VoiceAudioPath { get => _voiceAudioPath; set => Set(ref _voiceAudioPath, value); }
+
+    /// <summary>What the reference clip says, which cloning families want.</summary>
+    public string VoiceTranscript { get => _voiceTranscript; set => Set(ref _voiceTranscript, value); }
+
+    public string VoiceName { get => _voiceName; set => Set(ref _voiceName, value); }
+
+    /// <summary>Where the library is stored, so a user can find or back it up.</summary>
+    public string VoiceLibraryPath => _voices.StorePath;
+
+    public RelayCommand SaveVoiceCommand { get; }
+    public RelayCommand DeleteVoiceCommand { get; }
 
     /// <summary>
     /// Which palette to use. Both were defined as ThemeVariant dictionaries when
@@ -782,6 +830,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(LoadedModelName));
             Notify(nameof(LoadedModelState));
             Notify(nameof(LoadedModelWeights));
+            Notify(nameof(SupportsVoiceReference));
             UnloadCommand.RaiseCanExecuteChanged();
             ChunkBudget = TextChunker.DefaultBudget(model.Family);
             IsLoaded = true;
@@ -899,6 +948,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
                     request.SetText(Text, "en-us");
                     if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
+                    ApplyVoiceReference(request);
                 }
                 else
                 {
@@ -1511,6 +1561,63 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Notify(nameof(PlayLabel));
         Notify(nameof(HasPreviewAudio));
         PlayCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Attach the reference clip and its transcript, when the family can use
+    /// one. Sending a reference to a family that cannot is not an error the
+    /// engine reports — it is simply ignored — so it is gated here.
+    /// </summary>
+    private void ApplyVoiceReference(AudioCppRequest request)
+    {
+        if (!SupportsVoiceReference || VoiceAudioPath.Length == 0) return;
+
+        try
+        {
+            var reference = Wav.Read(VoiceAudioPath);
+            request.SetVoiceAudio(reference.Samples, reference.SampleRate, reference.Channels);
+            if (VoiceTranscript.Length > 0) request.SetStyleTag("reference_text", VoiceTranscript);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException)
+        {
+            Status = $"Reference voice: {exception.Message}";
+        }
+    }
+
+    private Task SaveVoiceAsync()
+    {
+        var voice = new SavedVoice(VoiceName, VoiceAudioPath, VoiceTranscript);
+        var existing = Voices.FirstOrDefault(v => v.Name == voice.Name);
+        if (existing is not null) Voices[Voices.IndexOf(existing)] = voice;
+        else Voices.Add(voice);
+
+        try
+        {
+            _voices.Save(Voices.Where(v => !v.Name.StartsWith("demo · ", StringComparison.Ordinal)));
+            Status = $"Saved voice '{voice.Name}'.";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Status = Describe(exception);
+        }
+        return System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    private Task DeleteVoiceAsync()
+    {
+        if (_selectedVoice is null) return System.Threading.Tasks.Task.CompletedTask;
+        Voices.Remove(_selectedVoice);
+        SelectedVoice = null;
+        try
+        {
+            _voices.Save(Voices.Where(v => !v.Name.StartsWith("demo · ", StringComparison.Ordinal)));
+            Status = "Voice removed.";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Status = Describe(exception);
+        }
+        return System.Threading.Tasks.Task.CompletedTask;
     }
 
     private void LoadCaptureDevices()
