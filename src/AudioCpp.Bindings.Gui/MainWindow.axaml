@@ -140,7 +140,7 @@
             <TextBlock Text="RESULT" Classes="Eyebrow" />
             <TextBlock Text="{Binding Summary}" Classes="Title" FontSize="15" />
             <TextBlock Classes="Subtle" FontSize="11"
-                       Text="Grey where both agree, orange for A only, blue for B only." />
+                       Text="Muted where both agree; each side's own words stand out." />
             <ScrollViewer Height="260">
               <ItemsControl ItemsSource="{Binding Diff}">
                 <ItemsControl.ItemsPanel>
@@ -148,8 +148,13 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:DiffPiece">
-                    <TextBlock Text="{Binding Text}" Foreground="{Binding Brush}"
-                               Margin="0,0,5,2" ToolTip.Tip="{Binding Side}" />
+                    <!-- Colour by class so the theme resources resolve per
+                         variant; a brush chosen in code cannot follow a switch. -->
+                    <TextBlock Text="{Binding Text}" Margin="0,0,5,2"
+                               ToolTip.Tip="{Binding Side}"
+                               Classes.diffSame="{Binding IsSame}"
+                               Classes.diffLeft="{Binding IsOnlyLeft}"
+                               Classes.diffRight="{Binding IsOnlyRight}" />
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
