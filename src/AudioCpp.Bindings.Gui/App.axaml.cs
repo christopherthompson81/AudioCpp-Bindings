@@ -2,7 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 
-namespace AudioCpp.Demo;
+namespace AudioCpp.Bindings.Gui;
 
 public partial class App : Application
 {

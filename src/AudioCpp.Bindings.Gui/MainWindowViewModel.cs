@@ -3,7 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using AudioCpp.Native;
 
-namespace AudioCpp.Demo;
+namespace AudioCpp.Bindings.Gui;
 
 /// <summary>
 /// Drives the sample. Everything here goes through the C ABI: the model is loaded

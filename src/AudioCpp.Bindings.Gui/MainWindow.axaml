@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="clr-namespace:AudioCpp.Demo"
-        x:Class="AudioCpp.Demo.MainWindow"
+        xmlns:vm="clr-namespace:AudioCpp.Bindings.Gui"
+        x:Class="AudioCpp.Bindings.Gui.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="audio.cpp — C ABI demo" Width="1120" Height="760">
 

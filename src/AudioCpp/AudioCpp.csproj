@@ -15,4 +15,11 @@
     <RootNamespace>AudioCpp</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- The coverage test reflects over NativeMethods to assert every ABI entry
+         point is bound; reading the source text instead would only prove the file
+         mentions a name, not that it compiled into a binding. -->
+    <InternalsVisibleTo Include="AudioCpp.BindingCoverage" />
+  </ItemGroup>
+
 </Project>

@@ -8,8 +8,8 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <AssemblyName>AudioCpp.Demo</AssemblyName>
-    <RootNamespace>AudioCpp.Demo</RootNamespace>
+    <AssemblyName>AudioCpp.Bindings.Gui</AssemblyName>
+    <RootNamespace>AudioCpp.Bindings.Gui</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/AudioCpp/AudioCpp.csproj" />
+    <ProjectReference Include="../AudioCpp/AudioCpp.csproj" />
   </ItemGroup>
 
 </Project>

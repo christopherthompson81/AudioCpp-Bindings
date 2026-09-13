@@ -1,4 +1,4 @@
-namespace AudioCpp.Demo;
+namespace AudioCpp.Bindings.Gui;
 
 /// <summary>
 /// Headless exercise of the view model, for checking the sample still drives the ABI

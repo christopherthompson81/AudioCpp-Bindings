@@ -2,7 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 
-namespace AudioCpp.Demo;
+namespace AudioCpp.Bindings.Gui;
 
 public partial class MainWindow : Window
 {
