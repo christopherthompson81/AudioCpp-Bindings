@@ -140,7 +140,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             }
             catch (Exception exception)
             {
-                return $"libaudiocpp not loaded: {exception.Message}";
+                // Describe(), not exception.Message -- the runtime's own text for a
+                // missing native library is a twenty-line list of every path it probed,
+                // which fills the status box and says nothing the user can act on.
+                return Describe(exception);
             }
         }
     }
@@ -510,8 +513,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private static string Describe(Exception exception) => exception switch
     {
         AudioCppException native => $"{native.Operation} failed: {native.Detail} [{native.Status}]",
-        DllNotFoundException => "libaudiocpp was not found. Set AUDIOCPP_NATIVE_DIR to the directory "
-                               + "containing it, or place it beside this executable.",
+        DllNotFoundException => "libaudiocpp was not found. Set AUDIOCPP_NATIVE_DIR to the "
+                               + "directory holding it (an audio.cpp build's bin/), or copy it "
+                               + "beside this executable, then restart.",
         _ => $"{exception.GetType().Name}: {exception.Message}",
     };
 
