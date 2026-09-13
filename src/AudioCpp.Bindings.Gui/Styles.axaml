@@ -142,6 +142,19 @@
     <Setter Property="Foreground" Value="{DynamicResource AppText}" />
   </Style>
 
+  <!-- Arena comparison: agreement recedes, each side's own words stand out. -->
+  <Style Selector="TextBlock.diffSame">
+    <Setter Property="Foreground" Value="{DynamicResource AppMuted}" />
+  </Style>
+  <Style Selector="TextBlock.diffLeft">
+    <Setter Property="Foreground" Value="{DynamicResource AppDanger}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.diffRight">
+    <Setter Property="Foreground" Value="{DynamicResource AppBlue}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
   <Style Selector="DataGrid">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource AppText}" />

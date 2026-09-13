@@ -2,12 +2,30 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using AudioCpp.Audio;
-using Avalonia.Media;
+
 
 namespace AudioCpp.Bindings.Gui;
 
-/// <summary>One run of a word in the comparison, coloured by which side had it.</summary>
-public sealed record DiffPiece(string Text, IBrush Brush, string Side);
+/// <summary>
+/// One word in the comparison, carrying which side had it rather than a colour.
+/// </summary>
+/// <remarks>
+/// The brush belongs in XAML: a colour chosen here is fixed at construction and
+/// cannot follow a theme switch, which is exactly the defect the waveform had.
+/// </remarks>
+public sealed record DiffPiece(string Text, TextDiff.Mark Mark)
+{
+    public bool IsSame => Mark == TextDiff.Mark.Same;
+    public bool IsOnlyLeft => Mark == TextDiff.Mark.OnlyLeft;
+    public bool IsOnlyRight => Mark == TextDiff.Mark.OnlyRight;
+
+    public string Side => Mark switch
+    {
+        TextDiff.Mark.OnlyLeft => "A only",
+        TextDiff.Mark.OnlyRight => "B only",
+        _ => "both",
+    };
+}
 
 /// <summary>
 /// Two configurations, one input, results side by side.
@@ -200,19 +218,7 @@ public sealed class Arena : INotifyPropertyChanged
 
         foreach (var piece in TextDiff.Compare(Left.Transcript, Right.Transcript))
         {
-            var brush = piece.Mark switch
-            {
-                TextDiff.Mark.OnlyLeft => Brushes.Orange,
-                TextDiff.Mark.OnlyRight => Brushes.DeepSkyBlue,
-                _ => Brushes.Gray,
-            };
-            var side = piece.Mark switch
-            {
-                TextDiff.Mark.OnlyLeft => "A only",
-                TextDiff.Mark.OnlyRight => "B only",
-                _ => "both",
-            };
-            Diff.Add(new DiffPiece(piece.Text, brush, side));
+            Diff.Add(new DiffPiece(piece.Text, piece.Mark));
         }
     }
 

@@ -59,6 +59,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private int _resultSampleRate = LiveTranscription.SampleRate;
     private string _timingBreakdown = "";
     private string _page = "Studio";
+    private string _theme = "System";
     private string _playStatus = "";
     private string _task = "asr";
     private string _audioPath = "";
@@ -307,6 +308,39 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public Arena Arena { get; } = new();
 
     public IReadOnlyList<string> Pages { get; } = ["Studio", "Arena"];
+
+    public IReadOnlyList<string> Themes { get; } = ["System", "Light", "Dark"];
+
+    /// <summary>
+    /// Which palette to use. Both were defined as ThemeVariant dictionaries when
+    /// the design was adopted, so this is a variant switch rather than a
+    /// restyle — the point of having built it that way.
+    /// </summary>
+    public string Theme
+    {
+        get => _theme;
+        set
+        {
+            if (!Set(ref _theme, value)) return;
+            ApplyTheme();
+        }
+    }
+
+    /// <summary>
+    /// Follow the OS unless told otherwise. Avalonia's Default resolves to
+    /// whatever the platform reports, which is what a user expects before they
+    /// have expressed a preference.
+    /// </summary>
+    private void ApplyTheme()
+    {
+        if (Avalonia.Application.Current is not { } app) return;
+        app.RequestedThemeVariant = _theme switch
+        {
+            "Light" => Avalonia.Styling.ThemeVariant.Light,
+            "Dark" => Avalonia.Styling.ThemeVariant.Dark,
+            _ => Avalonia.Styling.ThemeVariant.Default,
+        };
+    }
 
     /// <summary>Which page the window shows.</summary>
     public string Page
