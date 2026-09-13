@@ -916,7 +916,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         get => _task;
         set
         {
+            if (_task == value) return;
+
+            // The outgoing task's output goes with it, and the incoming task's
+            // comes back. Leaving it in place read as the new task's output --
+            // a transcript still in the panel after switching to synthesis
+            // looks like something the synthesis produced.
+            var leaving = _task;
             if (!Set(ref _task, value)) return;
+            StashResult(leaving);
+            RestoreResult(value);
             Notify(nameof(StudioTitle));
             Notify(nameof(TaskBadge));
             Notify(nameof(ShowText));
@@ -926,6 +935,65 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(ShowAsrAudioControls));
             RecordCommand.RaiseCanExecuteChanged();
         }
+    }
+
+    private readonly Dictionary<string, TaskResult> _resultsByTask = [];
+
+    private void StashResult(string task)
+    {
+        var result = new TaskResult(
+            Transcript, ResultJson, TimingBreakdown, _segmentedSummary, _lastRunSeconds,
+            [.. Rows], [.. _words], [.. OutputStreams], [.. Artifacts], [.. _segments],
+            _outputSamples, _outputSampleRate, _outputChannels);
+
+        if (result.HasAnything) _resultsByTask[task] = result;
+        else _resultsByTask.Remove(task);
+    }
+
+    private void RestoreResult(string task)
+    {
+        var result = _resultsByTask.GetValueOrDefault(task, TaskResult.Empty);
+
+        // The player holds a device open on the outgoing task's audio, so it
+        // has to go before the samples it is playing are replaced.
+        ResetPlayer();
+
+        Transcript = result.Transcript;
+        ResultJson = result.ResultJson;
+        TimingBreakdown = result.TimingBreakdown;
+        _segmentedSummary = result.SegmentedSummary;
+        _lastRunSeconds = result.LastRunSeconds;
+        _outputSamples = result.OutputSamples;
+        _outputSampleRate = result.OutputSampleRate;
+        _outputChannels = result.OutputChannels;
+
+        // Before the rows it points into are replaced. Setting it seeks the
+        // player, so a row left over from another task would seek the incoming
+        // task's audio to an offset from the outgoing one's.
+        _selectedRow = null;
+        Notify(nameof(SelectedRow));
+
+        Rows.Clear();
+        foreach (var row in result.Rows) Rows.Add(row);
+        _words.Clear();
+        _words.AddRange(result.Words);
+        OutputStreams.Clear();
+        foreach (var stream in result.Streams) OutputStreams.Add(stream);
+        Artifacts.Clear();
+        foreach (var artifact in result.Artifacts) Artifacts.Add(artifact);
+        _segments.Clear();
+        _segments.AddRange(result.Segments);
+
+        Notify(nameof(OutputSamples));
+        Notify(nameof(OutputSummary));
+        Notify(nameof(Timing));
+        Notify(nameof(RunState));
+        Notify(nameof(HasWordTimings));
+        Notify(nameof(HasPreviewAudio));
+        SaveWavCommand.RaiseCanExecuteChanged();
+        SaveSrtCommand.RaiseCanExecuteChanged();
+        SaveVttCommand.RaiseCanExecuteChanged();
+        PlayCommand.RaiseCanExecuteChanged();
     }
 
     /// <summary>The tasks the current workflow covers, named for the selector.</summary>
@@ -998,6 +1066,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             : _selectedPackages.TryGetValue(_workflow, out var remembered)
                 ? CatalogEntries.FirstOrDefault(e => e.Key == remembered)
                 : null;
+        // A family hint belongs to the package it came from. Carried into a
+        // workflow with nothing selected it is a hint for a family this tab
+        // cannot run, and a hand-picked model then fails to load with
+        // "GGUF embeds model spec for family 'x', not 'y'" -- which reads as a
+        // problem with the file rather than with a stale field two tabs away.
+        if (!_applyingSettings && _selectedEntry is null && FamilyHint.Length > 0
+            && !tasks.Any(task => AllEntries
+                    .Where(e => e.Family.Family == FamilyHint)
+                    .Any(e => e.SupportsTask(task))))
+        {
+            FamilyHint = "";
+        }
+
         RefreshWorkflowCounts();
         Notify(nameof(CatalogCount));
     }
@@ -1355,6 +1436,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             : _vadModel is not null;
         Notify(nameof(CancelHint));
         CancelCommand.RaiseCanExecuteChanged();
+        // Nothing stops the task being switched while a run is in flight, and a
+        // result that arrives afterwards belongs to the task that asked for it,
+        // not to whatever is on screen when it lands.
+        var ranAs = Task;
+
         try
         {
             var started = DateTime.UtcNow;
@@ -1371,8 +1457,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 // Read the audio before the session is built: how long the clip is decides
                 // whether the chunking preset applies, and the preset carries session
                 // options, which have to be settled before CreateSession.
+                // The same predicate the layout uses, so the run asks for exactly
+                // the inputs the window offered. "Anything but tts reads audio"
+                // was true when there were six tasks; music generation and voice
+                // design start from text alone, and demanding a WAV for them
+                // failed the run with "Select a WAV file first." over a panel
+                // that never showed an audio box.
                 (float[] Samples, int SampleRate, int Channels)? clip = null;
-                if (Task != "tts")
+                if (ShowAudioInput)
                 {
                     if (AudioPath.Length == 0)
                         throw new InvalidOperationException("Select a WAV file first.");
@@ -1421,24 +1513,36 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 {
                     request.SetOption(option.Name, option.Value);   // an explicit edit wins
                 }
-                if (Task == "tts")
+                if (!ShowAudioInput)
                 {
-                    // Long text goes piece by piece against one session; handing a
-                    // family more than it can take in a request either truncates or
-                    // throws, depending on the family.
-                    var pieces = SplitLongText
-                        ? TextChunker.Split(Text, Math.Max(1, ChunkBudget))
-                        : [Text];
-
-                    if (pieces.Count > 1)
+                    // Splitting is a speech concern, and only where the window
+                    // offered it. Music generation takes a prompt, not a
+                    // script -- upstream's own docs say the speech chunker does
+                    // not apply -- so cutting a prompt into pieces and
+                    // concatenating the results would produce several unrelated
+                    // clips joined end to end.
+                    if (ShowTextChunking)
                     {
-                        transcript = RunLongText(pieces, rows);
-                        return;
+                        // Long text goes piece by piece against one session; handing
+                        // a family more than it can take in a request either
+                        // truncates or throws, depending on the family.
+                        var pieces = SplitLongText
+                            ? TextChunker.Split(Text, Math.Max(1, ChunkBudget))
+                            : [Text];
+
+                        if (pieces.Count > 1)
+                        {
+                            transcript = RunLongText(pieces, rows);
+                            return;
+                        }
                     }
 
                     request.SetText(Text, "en-us");
-                    if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
-                    ApplyVoiceReference(request);
+                    if (ShowVoice)
+                    {
+                        if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
+                        ApplyVoiceReference(request);
+                    }
                 }
                 else
                 {
@@ -1542,6 +1646,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             // produces nothing, and "the family produced no output for this
             // input" reads as a model problem rather than as the thing the user
             // just asked for.
+            if (Task != ranAs)
+            {
+                // Put it where it belongs and leave the visible panel showing
+                // the task the user actually switched to.
+                StashResult(ranAs);
+                RestoreResult(Task);
+                Log("run", $"{ranAs} finished after switching to {Task}; "
+                           + "its output is kept under the task that ran it.");
+                return;
+            }
+
             Status = _cancel?.IsCancellationRequested == true
                 ? _segmentedSummary.Length > 0
                     ? $"Cancelled.  {_segmentedSummary}"
@@ -2298,6 +2413,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             Status = Describe(exception);
         }
+    }
+
+    /// <summary>Write the run's audio, for a headless caller with no dialog.</summary>
+    internal void WriteOutput(string path)
+    {
+        if (_outputSamples is null) return;
+        Wav.Write(path, _outputSamples, _outputSampleRate, _outputChannels);
     }
 
     private async Task SaveWavAsync()

@@ -311,6 +311,155 @@ internal static class LiveCheck
                 // Cancel has to either stop the run or be visibly unavailable.
                 // Needs a real model: what decides the answer is the shape of
                 // the run, and that only exists once there is one.
+                // Install a package and wait for it, reporting progress. The
+                // cancel check deliberately stops a download after a couple of
+                // seconds; this is the one that finishes.
+                // A result belongs to the task that produced it. Switching away
+                // must take it away, and switching back must bring it back.
+                if (args.Contains("--result-check"))
+                {
+                    void Expect(string what, bool ok)
+                    {
+                        Console.WriteLine($"  {(ok ? "ok  " : "FAIL")}  {what}");
+                        if (!ok) failures++;
+                    }
+
+                    // The hint has to match the model the harness was handed;
+                    // a saved one from another workflow would fail the load.
+                    viewModel.FamilyHint = args
+                        .FirstOrDefault(a => a.StartsWith("family="))?["family=".Length..] ?? "";
+                    await viewModel.LoadCommand.ExecuteAsync();
+                    Console.WriteLine($"load: {viewModel.Status}");
+                    await viewModel.RunCommand.ExecuteAsync();
+                    Console.WriteLine($"run:  {viewModel.Status}");
+
+                    var transcript = viewModel.Transcript;
+                    var rows = viewModel.Rows.Count;
+                    var timing = viewModel.Timing;
+                    Console.WriteLine($"asr produced {rows} row(s), "
+                                      + $"{transcript.Length} char(s) of transcript");
+                    Expect("the run produced something to carry", rows > 0 && transcript.Length > 0);
+
+                    // Away, within the same workflow's siblings and to another
+                    // workflow entirely.
+                    viewModel.CurrentWorkflow = "tts";
+                    await Task.Delay(250);
+                    Console.WriteLine($"  on tts: {viewModel.Rows.Count} row(s), "
+                                      + $"transcript '{viewModel.Transcript}', "
+                                      + $"timing '{viewModel.Timing}'");
+                    Expect("switching away clears the output", viewModel.Rows.Count == 0
+                                                               && viewModel.Transcript.Length == 0);
+                    Expect("and clears the timing with it", viewModel.Timing != timing);
+                    Expect("and Save WAV is not offered", !viewModel.SaveWavCommand.CanExecute(null));
+                    Expect("and subtitles are not offered", !viewModel.SaveSrtCommand.CanExecute(null));
+
+                    viewModel.CurrentWorkflow = "asr";
+                    await Task.Delay(250);
+                    Console.WriteLine($"  back on asr: {viewModel.Rows.Count} row(s), "
+                                      + $"{viewModel.Transcript.Length} char(s), "
+                                      + $"timing '{viewModel.Timing}'");
+                    Expect("switching back restores the rows", viewModel.Rows.Count == rows);
+                    Expect("and the transcript", viewModel.Transcript == transcript);
+                    Expect("and the timing", viewModel.Timing == timing);
+                    Expect("and the subtitle commands", viewModel.SaveSrtCommand.CanExecute(null));
+
+                    // A row selected under one task must not survive into
+                    // another: setting it seeks the player, so a leftover row
+                    // would seek the incoming task's audio to an offset from
+                    // the outgoing one's.
+                    viewModel.CurrentWorkflow = "asr";
+                    await Task.Delay(200);
+                    viewModel.SelectedRow = viewModel.Rows.FirstOrDefault(r => r.StartSample > 0);
+                    var picked = viewModel.SelectedRow;
+                    viewModel.CurrentWorkflow = "sep";
+                    await Task.Delay(200);
+                    Console.WriteLine($"  selected row after switching: "
+                                      + $"{viewModel.SelectedRow?.Detail ?? "(none)"}");
+                    Expect("a selected row does not survive a task switch",
+                           picked is null || viewModel.SelectedRow is null);
+
+                    // A run whose task changed under it belongs to the task that
+                    // asked for it, not to whatever is on screen when it lands.
+                    viewModel.CurrentWorkflow = "asr";
+                    await Task.Delay(200);
+                    var inFlight = viewModel.RunCommand.ExecuteAsync();
+                    await Task.Delay(120);
+                    viewModel.CurrentWorkflow = "sep";
+                    await inFlight;
+                    await Task.Delay(200);
+                    Console.WriteLine($"  after switching mid-run, on {viewModel.Task}: "
+                                      + $"{viewModel.Rows.Count} row(s)");
+                    Expect("a run landing late does not fill the new task's panel",
+                           viewModel.Rows.Count == 0);
+                    viewModel.CurrentWorkflow = "asr";
+                    await Task.Delay(200);
+                    Console.WriteLine($"  and back on asr: {viewModel.Rows.Count} row(s)");
+                    Expect("it is kept under the task that ran it", viewModel.Rows.Count > 0);
+
+                    // A family hint belongs to the package it came from. Left
+                    // behind in a workflow that cannot run that family, a
+                    // hand-picked model fails to load with a message about the
+                    // file rather than about the stale field.
+                    viewModel.CurrentWorkflow = "music";
+                    await Task.Delay(250);
+                    viewModel.SelectedEntry = viewModel.CatalogEntries
+                        .FirstOrDefault(e => e.Family.Family == "ace_step");
+                    var musicHint = viewModel.FamilyHint;
+                    viewModel.CurrentWorkflow = "sep";
+                    await Task.Delay(250);
+                    Console.WriteLine($"  hint after music({musicHint}) -> separation: "
+                                      + $"'{viewModel.FamilyHint}'");
+                    Expect("a family hint does not follow you to another workflow",
+                           musicHint.Length == 0 || viewModel.FamilyHint != musicHint);
+
+                    Console.WriteLine(failures == 0 ? "results OK" : $"results: {failures} failure(s)");
+                    Environment.Exit(failures == 0 ? 0 : 1);
+                    return;
+                }
+
+                if (args.Contains("--install-check"))
+                {
+                    var wanted = args.FirstOrDefault(a => a.StartsWith("package="))?["package=".Length..];
+                    if (args.FirstOrDefault(a => a.StartsWith("packageTask="))?["packageTask=".Length..]
+                        is { } installWorkflow)
+                    {
+                        viewModel.CurrentWorkflow = installWorkflow;
+                        await Task.Delay(300);
+                    }
+                    viewModel.SelectedEntry = viewModel.CatalogEntries
+                        .FirstOrDefault(e => wanted is not null
+                            && e.Title.Contains(wanted, StringComparison.OrdinalIgnoreCase));
+                    if (viewModel.SelectedEntry is null)
+                    {
+                        Console.Error.WriteLine($"no catalog entry matches '{wanted}'");
+                        Environment.Exit(1);
+                        return;
+                    }
+                    Console.WriteLine($"installing {viewModel.SelectedEntry.Title}");
+                    Console.WriteLine($"  into {viewModel.ModelsRoot}");
+
+                    var last = -1;
+                    var progress = Task.Run(async () =>
+                    {
+                        while (viewModel.Busy)
+                        {
+                            var pct = (int)(viewModel.InstallFraction * 100);
+                            if (pct != last && pct % 5 == 0)
+                            {
+                                last = pct;
+                                Console.WriteLine($"  {pct,3}%  {viewModel.InstallStatus}");
+                            }
+                            await Task.Delay(1000);
+                        }
+                    });
+                    await viewModel.InstallCommand.ExecuteAsync();
+                    await progress;
+                    Console.WriteLine($"done: {viewModel.InstallStatus}");
+                    Console.WriteLine($"model path: {viewModel.ModelPath}");
+                    Environment.Exit(viewModel.InstallStatus.StartsWith("Installed") ? 0 : 1);
+                    return;
+                }
+
                 if (args.Contains("--cancel-check"))
                 {
                     await viewModel.LoadCommand.ExecuteAsync();
@@ -816,6 +965,10 @@ internal static class LiveCheck
                 {
                     // Load and run once so there is audio to preview: the input
                     // clip is captured during a run.
+                    // The hint has to match the model the harness was handed;
+                    // a saved one from another workflow would fail the load.
+                    viewModel.FamilyHint = args
+                        .FirstOrDefault(a => a.StartsWith("family="))?["family=".Length..] ?? "";
                     await viewModel.LoadCommand.ExecuteAsync();
                     Console.WriteLine($"load: {viewModel.Status}");
                     await viewModel.RunCommand.ExecuteAsync();
