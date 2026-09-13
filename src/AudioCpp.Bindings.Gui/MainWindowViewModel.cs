@@ -43,6 +43,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private readonly List<AudioSegment> _segments = [];
     private CancellationTokenSource? _cancel;
     private LiveTranscription? _live;
+    private bool _togglingRecording;
     private CaptureDeviceInfo? _captureDevice;
     private bool _isRecording;
     private float _inputLevel;
@@ -481,6 +482,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Status = "Loading…";
         try
         {
+            // A recording holds a session built from the model about to be freed.
+            // The ABI keeps parents alive so this would not crash, but the pump
+            // would go on feeding a model the user believes they replaced.
+            await StopRecordingAsync();
+
             await System.Threading.Tasks.Task.Run(() =>
             {
                 // Freed in reverse, though the ABI keeps parents alive so order is free.
@@ -1044,6 +1050,25 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return System.Threading.Tasks.Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Stop and release a live recording if one is running. Safe to call when
+    /// none is, and used both by the Record button and on shutdown -- without
+    /// the latter the microphone stays open until the process exits.
+    /// </summary>
+    public async Task StopRecordingAsync()
+    {
+        if (_live is null) return;
+
+        var live = _live;
+        _live = null;
+        try { await live.StopAsync(); }
+        catch (AudioCppException) { /* nothing to finish */ }
+        live.Dispose();
+
+        IsRecording = false;
+        InputLevel = 0;
+    }
+
     private void LoadCaptureDevices()
     {
         try
@@ -1071,11 +1096,30 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// </remarks>
     private async Task ToggleRecordingAsync()
     {
+        // Stopping awaits the pump, and the button stays live during that await.
+        // A second press would otherwise stop the same session twice.
+        if (_togglingRecording) return;
+        _togglingRecording = true;
+        try
+        {
+            await ToggleRecordingCoreAsync();
+        }
+        finally
+        {
+            _togglingRecording = false;
+            RecordCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    private async Task ToggleRecordingCoreAsync()
+    {
         if (_live is not null)
         {
-            var final = await _live.StopAsync();
-            _live.Dispose();
+            var live = _live;
             _live = null;
+            var final = "";
+            try { final = await live.StopAsync(); }
+            finally { live.Dispose(); }
             IsRecording = false;
             InputLevel = 0;
 

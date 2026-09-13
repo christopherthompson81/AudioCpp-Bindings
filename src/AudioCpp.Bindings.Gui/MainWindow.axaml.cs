@@ -19,6 +19,17 @@ public partial class MainWindow : Window
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
+    /// <summary>
+    /// Release the microphone on close. Without this it stays open until the
+    /// process exits, which on most desktops leaves a recording indicator lit
+    /// after the window is gone.
+    /// </summary>
+    protected override async void OnClosing(WindowClosingEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel) await viewModel.StopRecordingAsync();
+        base.OnClosing(e);
+    }
+
     private async Task<string?> PickPathAsync(string title, bool directory)
     {
         if (directory)
