@@ -35,6 +35,11 @@ internal static class Smoke
         }
 
         Console.WriteLine(viewModel.AbiVersion);
+        Console.WriteLine(viewModel.CatalogCount);
+        foreach (var entry in viewModel.CatalogEntries.Take(4))
+        {
+            Console.WriteLine($"  {entry.StateText,-10} {entry.Title}");
+        }
 
         await viewModel.LoadCommand.ExecuteAsync();
         Console.WriteLine(viewModel.Status);

@@ -119,7 +119,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         set { if (value is not null) Task = value.Task; }
     }
 
-    /// <summary>Installable packages, read from audio.cpp's model_specs.</summary>
+    /// <summary>Every installable package, read from audio.cpp's model_specs.</summary>
+    public List<CatalogEntry> AllEntries { get; } = [];
+
+    /// <summary>
+    /// The packages the picker shows: those whose family declares the selected
+    /// task. Listing all 235 regardless meant scrolling past 37 TTS models to
+    /// find an ASR one.
+    /// </summary>
     public ObservableCollection<CatalogEntry> CatalogEntries { get; } = [];
 
     /// <summary>
@@ -222,8 +229,32 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(TaskTitle));
             Notify(nameof(TaskBlurb));
             Notify(nameof(TaskBadge));
+            FilterCatalog();
         }
     }
+
+    /// <summary>
+    /// Narrow the picker to the current task, keeping the selection if it still
+    /// applies. Families declare their own task names, which are the same tokens
+    /// the session takes.
+    /// </summary>
+    private void FilterCatalog()
+    {
+        if (AllEntries.Count == 0) return;
+
+        var keep = _selectedEntry;
+        CatalogEntries.Clear();
+        foreach (var entry in AllEntries.Where(e => e.SupportsTask(_task)))
+        {
+            CatalogEntries.Add(entry);
+        }
+
+        SelectedEntry = keep is not null && CatalogEntries.Contains(keep) ? keep : null;
+        Notify(nameof(CatalogCount));
+    }
+
+    public string CatalogCount =>
+        $"{CatalogEntries.Count} package(s) for {_task}, {AllEntries.Count} in all.";
 
     private static string TitleFor(string task) => task switch
     {
@@ -857,14 +888,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             foreach (var package in family.Packages)
             {
-                CatalogEntries.Add(new CatalogEntry(family, package));
+                AllEntries.Add(new CatalogEntry(family, package));
             }
         }
 
         RefreshCatalogState();
+        FilterCatalog();
         InstallStatus = catalog.Unreadable.Count == 0
-            ? $"{CatalogEntries.Count} packages across {catalog.Families.Count} families."
-            : $"{CatalogEntries.Count} packages; {catalog.Unreadable.Count} spec(s) unreadable.";
+            ? $"{AllEntries.Count} packages across {catalog.Families.Count} families."
+            : $"{AllEntries.Count} packages; {catalog.Unreadable.Count} spec(s) unreadable.";
     }
 
     /// <summary>
@@ -873,7 +905,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// </summary>
     private void RefreshCatalogState()
     {
-        foreach (var entry in CatalogEntries)
+        foreach (var entry in AllEntries)
         {
             entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
             if (entry.IsInstalled)

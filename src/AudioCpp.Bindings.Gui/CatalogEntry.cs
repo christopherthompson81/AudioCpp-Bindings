@@ -21,8 +21,23 @@ public sealed class CatalogEntry(FamilySpec family, PackageSpec package)
     public FamilySpec Family { get; } = family;
     public PackageSpec Package { get; } = package;
 
-    public string Title => $"{Family.DisplayName} · {Package.Precision}";
-    public string Subtitle => $"{Family.Family} · {Package.Format}";
+    /// <summary>
+    /// The package's own name, not the family's.
+    /// </summary>
+    /// <remarks>
+    /// A family can ship packages of different models: parakeet_tdt offers both
+    /// Parakeet and Orukeet, a fine-tune of it, at the same precision. Titling
+    /// them from the family name and precision made the two indistinguishable
+    /// in the picker, so choosing one could fetch the other.
+    /// </remarks>
+    public string Title => Package.DisplayName.Length > 0
+        ? Package.DisplayName
+        : $"{Family.DisplayName} · {Package.Precision}";
+
+    public string Subtitle => $"{Family.Family} · {Package.Format} · {Package.Precision}";
+
+    /// <summary>Whether this family can do the given task, for filtering the picker.</summary>
+    public bool SupportsTask(string task) => Family.Tasks.Contains(task);
 
     public InstallState State
     {
