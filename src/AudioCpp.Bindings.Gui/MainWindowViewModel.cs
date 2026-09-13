@@ -855,11 +855,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// the .mid file beside it is what the user wanted.
     /// </remarks>
     private bool TranscriptIsData =>
-        Transcript.StartsWith('[') || Transcript.StartsWith('{');
+        Transcript.AsSpan().TrimStart() is ['[' or '{', ..];
 
+    /// <remarks>
+    /// Ordered by what a task's result actually is: prose belongs in the
+    /// transcript, separation's result is its stems, audio-to-MIDI's is its
+    /// file. Preferring artifacts outright would have sent a separation that
+    /// also emitted one to the wrong tab.
+    /// </remarks>
     private void SelectResultTab() =>
-        ResultTab = Artifacts.Count > 0 && (Transcript.Length == 0 || TranscriptIsData) ? 3
-            : Transcript.Length > 0 ? 0
+        ResultTab = Transcript.Length > 0 && !TranscriptIsData ? 0
             : OutputStreams.Count > 0 ? 2
             : Artifacts.Count > 0 ? 3
             : Rows.Count > 0 ? 1
@@ -2956,6 +2961,13 @@ public sealed record ArtifactEntry(string Id, string Kind, byte[] Payload, strin
     /// of that task and guessing its type from the bytes would be worse than
     /// reading what the model said.
     /// </remarks>
+    /// <summary>An id is a name from the model, not a path from this app.</summary>
+    private static string Safe(string id)
+    {
+        var name = System.IO.Path.GetFileName(id);
+        return name.Length > 0 ? name : "artifact";
+    }
+
     public string SuggestedFileName
     {
         get
@@ -2965,10 +2977,10 @@ public sealed record ArtifactEntry(string Id, string Kind, byte[] Payload, strin
                 var split = pair.Split('=', 2);
                 if (split.Length == 2 && split[0].Trim() == "extension" && split[1].Length > 0)
                 {
-                    return $"{Id}.{split[1].Trim()}";
+                    return $"{Safe(Id)}.{split[1].Trim()}";
                 }
             }
-            return $"{Id}.bin";
+            return $"{Safe(Id)}.bin";
         }
     }
 
