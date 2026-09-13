@@ -277,7 +277,7 @@ internal static class LiveCheck
                         };
                         await Task.Delay(400);
                         Console.WriteLine($"language: {viewModel.Language}  "
-                                          + $"task title now '{viewModel.TaskTitle}'");
+                                          + $"task title now '{viewModel.StudioTitle}'");
                     }
 
                     if (args.FirstOrDefault(a => a.StartsWith("page="))?["page=".Length..] is { } page)
@@ -295,8 +295,10 @@ internal static class LiveCheck
 
                     // Left alone when not given, so a screenshot can show what
                     // the saved settings restored rather than what this forced.
+                    // task= names a workflow tab; the engine task inside it is
+                    // resolved from the model, as it is in the window.
                     var task = args.FirstOrDefault(a => a.StartsWith("task="))?["task=".Length..];
-                    if (task is not null) viewModel.Task = task;
+                    if (task is not null) viewModel.CurrentWorkflow = task;
                     task = viewModel.Task;
                     await Task.Delay(400);
                     Console.WriteLine($"{task}: text={viewModel.ShowText} voice={viewModel.ShowVoice} "
@@ -370,7 +372,16 @@ internal static class LiveCheck
                         if (args.FirstOrDefault(a => a.StartsWith("packageTask="))?["packageTask=".Length..]
                             is { } packageTask)
                         {
-                            viewModel.Task = packageTask;   // the catalogue is task-filtered
+                            // A workflow id, not an engine task: the catalogue is
+                            // workflow-filtered, and an unknown id would quietly
+                            // fall back to ASR and search the wrong list.
+                            if (!Workflow.All.Any(w => w.Id == packageTask))
+                            {
+                                Console.Error.WriteLine($"packageTask='{packageTask}' is not a "
+                                    + $"workflow; try {string.Join(", ", Workflow.All.Select(w => w.Id))}");
+                                failures++;
+                            }
+                            viewModel.CurrentWorkflow = packageTask;
                             await Task.Delay(200);
                         }
                         viewModel.SelectedEntry = viewModel.CatalogEntries
@@ -430,9 +441,95 @@ internal static class LiveCheck
                 // relationships rather than counts, because a count is a fact
                 // about today's catalogue and would need editing every time
                 // upstream adds a package.
+                // The workflow tabs, and the task each one resolves to.
+                if (args.Contains("--workflow-check"))
+                {
+                    void Expect(string what, bool ok)
+                    {
+                        Console.WriteLine($"  {(ok ? "ok  " : "FAIL")}  {what}");
+                        if (!ok) failures++;
+                    }
+
+                    Console.WriteLine($"{Workflow.All.Count} workflows, "
+                                      + $"{Workflow.AllTasks.Count} engine tasks");
+                    foreach (var workflow in Workflow.All)
+                    {
+                        viewModel.CurrentWorkflow = workflow.Id;
+                        await Task.Delay(120);
+                        Console.WriteLine($"  {workflow.Id,-9} "
+                                          + $"{Resources.Strings.WorkflowLabel(workflow),-22} "
+                                          + $"tasks [{string.Join(" ", workflow.Tasks)}]  "
+                                          + $"-> {viewModel.Task}  "
+                                          + $"{viewModel.CatalogEntries.Count} package(s)");
+                        if (!workflow.Tasks.Contains(viewModel.Task))
+                        {
+                            Console.Error.WriteLine($"  {workflow.Id} resolved to {viewModel.Task}, "
+                                                    + "which is not one of its tasks");
+                            failures++;
+                        }
+                    }
+
+                    // Every task belongs to exactly one workflow: a task in two
+                    // would make the tab a model lands on depend on iteration
+                    // order, and a task in none is unreachable, which is what
+                    // #36 was about.
+                    // Per-task package counts, so a task nothing declares shows
+                    // up here rather than as an empty chip in the window.
+                    viewModel.CurrentWorkflow = "asr";
+                    await Task.Delay(80);
+                    foreach (var task in Workflow.AllTasks)
+                    {
+                        var n = viewModel.AllEntries.Count(e => e.SupportsTask(task));
+                        if (n == 0) Console.WriteLine($"  no package declares '{task}'");
+                    }
+
+                    var duplicated = Workflow.AllTasks
+                        .GroupBy(t => t).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+                    Expect("no task is in two workflows", duplicated.Count == 0);
+
+                    // Control visibility has to follow the task, not the tab.
+                    var layouts = new List<string>();
+                    foreach (var task in Workflow.AllTasks)
+                    {
+                        viewModel.CurrentWorkflow = Workflow.ForTask(task).Id;
+                        viewModel.Task = task;
+                        await Task.Delay(40);
+                        var shape = $"text={viewModel.ShowText} voice={viewModel.ShowVoice} "
+                                  + $"audio={viewModel.ShowAudioInput} asr={viewModel.ShowAsrAudioControls} "
+                                  + $"split={viewModel.ShowTextChunking}";
+                        Console.WriteLine($"  {task,-6} {Resources.Strings.TaskName(task),-26} {shape}");
+                        layouts.Add(shape);
+
+                        if (!viewModel.ShowText && !viewModel.ShowAudioInput)
+                        {
+                            Console.Error.WriteLine($"  {task} offers no input at all"); failures++;
+                        }
+                    }
+                    Expect("tasks do not all share one layout", layouts.Distinct().Count() > 1);
+
+                    // Only a multi-task workflow asks which task.
+                    foreach (var workflow in Workflow.All)
+                    {
+                        viewModel.CurrentWorkflow = workflow.Id;
+                        await Task.Delay(40);
+                        if (viewModel.ShowTaskChoice != workflow.Tasks.Count > 1)
+                        {
+                            Console.Error.WriteLine($"  {workflow.Id}: task choice shown="
+                                                    + $"{viewModel.ShowTaskChoice} for "
+                                                    + $"{workflow.Tasks.Count} task(s)");
+                            failures++;
+                        }
+                    }
+                    Expect("the task choice appears only where there is one", true);
+
+                    Console.WriteLine(failures == 0 ? "workflows OK" : $"workflows: {failures} failure(s)");
+                    Environment.Exit(failures == 0 ? 0 : 1);
+                    return;
+                }
+
                 if (args.Contains("--picker-check"))
                 {
-                    viewModel.Task = "asr";
+                    viewModel.CurrentWorkflow = "asr";
                     await Task.Delay(150);
                     var all = viewModel.CatalogEntries.ToList();
 
@@ -470,7 +567,7 @@ internal static class LiveCheck
 
                     // The picker is already filtered by task; searching must not
                     // reach past that filter.
-                    viewModel.Task = "tts";
+                    viewModel.CurrentWorkflow = "tts";
                     await Task.Delay(150);
                     var acrossTask = viewModel.CatalogEntries
                         .Count(e => MainWindowViewModel.Matches(e, "parakeet"));

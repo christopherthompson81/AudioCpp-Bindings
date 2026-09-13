@@ -69,6 +69,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _voiceName = "";
     private string _playStatus = "";
     private string _task = "asr";
+    private string _workflow = "asr";
     private string _audioPath = "";
     private string _text = "The quick brown fox jumps over the lazy dog.";
     private string _voiceId = "";
@@ -98,7 +99,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // Present before any model is loaded, as the web UI's are. Counts fill in
         // on load; an empty row would read as a broken layout rather than an
         // unloaded one.
-        foreach (var task in Tasks) TaskChips.Add(new TaskChip(task, TitleFor(task), 0));
+        foreach (var workflow in Workflow.All)
+        {
+            WorkflowChips.Add(new WorkflowChip(
+                workflow.Id, Resources.Strings.WorkflowLabel(workflow), 0));
+        }
         RelabelChoices();
 
         InstallCommand = new RelayCommand(
@@ -145,7 +150,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Properties whose value survives a restart.</summary>
     internal static readonly HashSet<string> PersistedProperties =
     [
-        nameof(Task), nameof(Theme), nameof(Language), nameof(Backend), nameof(Threads),
+        nameof(CurrentWorkflow), nameof(Theme), nameof(Language), nameof(Backend), nameof(Threads),
         nameof(ModelPath), nameof(FamilyHint), nameof(ModelsRoot),
         nameof(VadModelPath), nameof(VadAssetPath), nameof(MinSegmentSpan), nameof(MaxSegmentSpan),
         nameof(UseBuiltInChunking), nameof(ChunkSeconds), nameof(SplitLongText), nameof(ChunkBudget),
@@ -157,7 +162,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     internal Settings Capture() => new()
     {
-        Task = Task,
+        CurrentWorkflow = CurrentWorkflow,
         Theme = Theme,
         Language = Language,
         Backend = Backend,
@@ -196,7 +201,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _applyingSettings = true;
         try
         {
-            if (saved.Task is { Length: > 0 } task && Tasks.Contains(task)) Task = task;
+            if (saved.CurrentWorkflow is { Length: > 0 } workflow
+                && Workflow.All.Any(w => w.Id == workflow)) CurrentWorkflow = workflow;
             if (saved.Theme is { Length: > 0 } theme) Theme = theme;
             if (saved.Language is { Length: > 0 } language
                 && Resources.Loc.Available.Contains(language)) Language = language;
@@ -316,19 +322,28 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public Func<string, Task<string?>>? PickSavePath { get; set; }
 
     public IReadOnlyList<string> Backends { get; } = ["cpu", "cuda", "hip", "vulkan", "metal", "best"];
-    public IReadOnlyList<string> Tasks { get; } = ["asr", "tts", "vad", "diar", "sep", "align"];
+    /// <summary>
+    /// Every engine task any workflow can reach, which is what a loaded model
+    /// is asked about.
+    /// </summary>
+    /// <remarks>
+    /// Was a hand-kept list of six. Six of the thirteen the web UI reaches were
+    /// missing from it, so a model that could clone a voice or convert one
+    /// reported no supported tasks at all.
+    /// </remarks>
+    public IReadOnlyList<string> Tasks => Workflow.AllTasks;
 
     /// <summary>
     /// The task selector along the top. Count is how many of the loaded model's
     /// tasks match -- 0 or 1 here, since this app holds one model, where the web
     /// UI counts across a whole catalog. Same shape, honest number.
     /// </summary>
-    public ObservableCollection<TaskChip> TaskChips { get; } = [];
+    public ObservableCollection<WorkflowChip> WorkflowChips { get; } = [];
 
-    public TaskChip? SelectedChip
+    public WorkflowChip? SelectedChip
     {
-        get => TaskChips.FirstOrDefault(c => c.Task == _task);
-        set { if (value is not null) Task = value.Task; }
+        get => WorkflowChips.FirstOrDefault(c => c.Workflow == _workflow);
+        set { if (value is not null) CurrentWorkflow = value.Workflow; }
     }
 
     /// <summary>Capture devices the system offers, refreshed on demand.</summary>
@@ -469,10 +484,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             InstallCommand.RaiseCanExecuteChanged();
             DeleteCommand.RaiseCanExecuteChanged();
             Notify(nameof(SelectedSummary));
+            Notify(nameof(StudioTitle));
             if (value is null) return;
 
             FamilyHint = value.Family.Family;
             if (value.IsInstalled) ModelPath = value.ResolvePath(ModelsRoot);
+            // The model decides which of the workflow's tasks this run is.
+            ResolveTask();
         }
     }
 
@@ -565,8 +583,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (!Set(ref _language, value)) return;
             Resources.Loc.Use(value);
             // Task titles and blurbs are computed, so they need a nudge too.
-            Notify(nameof(TaskTitle));
-            Notify(nameof(TaskBlurb));
+            Notify(nameof(StudioTitle));
+            Notify(nameof(StudioBlurb));
             RebuildTaskChips();
             RelabelChoices();
             // Both toggle between two resource strings, so neither is reached by
@@ -576,12 +594,37 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// How many packages each workflow has, as the web UI's tabs show.
+    /// </summary>
+    /// <remarks>
+    /// From the catalogue, not from the loaded model. The count was previously
+    /// 0 or 1 depending on whether the resident model could do the workflow,
+    /// which meant every tab read 0 until something was loaded — a row of
+    /// zeroes over a picker that was offering packages.
+    /// </remarks>
+    private void RefreshWorkflowCounts()
+    {
+        for (var i = 0; i < WorkflowChips.Count; i++)
+        {
+            var tasks = Workflow.For(WorkflowChips[i].Workflow).Tasks;
+            WorkflowChips[i] = WorkflowChips[i] with
+            {
+                Count = AllEntries.Count(e => tasks.Any(e.SupportsTask)),
+            };
+        }
+    }
+
     private void RebuildTaskChips()
     {
-        for (var i = 0; i < TaskChips.Count; i++)
+        for (var i = 0; i < WorkflowChips.Count; i++)
         {
-            TaskChips[i] = TaskChips[i] with { Title = TitleFor(TaskChips[i].Task) };
+            WorkflowChips[i] = WorkflowChips[i] with
+            {
+                Title = Resources.Strings.WorkflowLabel(Workflow.For(WorkflowChips[i].Workflow)),
+            };
         }
+        Notify(nameof(WorkflowTaskNames));
     }
 
     /// <summary>Reference voices kept on disk between sessions.</summary>
@@ -800,15 +843,44 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     /// <summary>Directory holding silero_vad_16k.safetensors; blank means go looking.</summary>
     public string VadAssetPath { get => _vadAssetPath; set => Set(ref _vadAssetPath, value); }
+    /// <summary>
+    /// Which workflow the studio is showing: the choice a person makes.
+    /// </summary>
+    /// <remarks>
+    /// Changing it re-filters the picker to the models that can do anything in
+    /// the workflow, and moves the running task to one of the workflow's own.
+    /// </remarks>
+    public string CurrentWorkflow
+    {
+        get => _workflow;
+        set
+        {
+            if (!Set(ref _workflow, value)) return;
+            Notify(nameof(SelectedChip));
+            Notify(nameof(StudioBlurb));
+            Notify(nameof(WorkflowTaskNames));
+            Notify(nameof(ShowTaskChoice));
+            FilterCatalog();
+            ResolveTask();
+        }
+    }
+
+    /// <summary>
+    /// The engine task a run will use.
+    /// </summary>
+    /// <remarks>
+    /// Follows the workflow and the chosen model rather than being picked
+    /// first: a model declares what it does, and a task the model cannot do is
+    /// not a choice worth offering. It stays settable because a model loaded
+    /// from a path has no catalogue entry to ask — see ShowTaskChoice.
+    /// </remarks>
     public string Task
     {
         get => _task;
         set
         {
             if (!Set(ref _task, value)) return;
-            Notify(nameof(SelectedChip));
-            Notify(nameof(TaskTitle));
-            Notify(nameof(TaskBlurb));
+            Notify(nameof(StudioTitle));
             Notify(nameof(TaskBadge));
             Notify(nameof(ShowText));
             Notify(nameof(ShowVoice));
@@ -816,34 +888,79 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(ShowAudioInput));
             Notify(nameof(ShowAsrAudioControls));
             RecordCommand.RaiseCanExecuteChanged();
-            FilterCatalog();
         }
     }
 
+    /// <summary>The tasks the current workflow covers, named for the selector.</summary>
+    public IReadOnlyList<string> WorkflowTasks => Workflow.For(_workflow).Tasks;
+
+    public IReadOnlyList<string> WorkflowTaskNames =>
+        WorkflowTasks.Select(Resources.Strings.TaskName).ToList();
+
     /// <summary>
-    /// Narrow the picker to the current task, keeping the selection if it still
-    /// applies. Families declare their own task names, which are the same tokens
-    /// the session takes.
+    /// Whether the task inside the workflow is worth asking about.
     /// </summary>
+    /// <remarks>
+    /// One task means there is nothing to choose. Where a workflow covers
+    /// several — analysis covers five — the model usually settles it, but a
+    /// model loaded from a path declares its family, not which of the family's
+    /// tasks this run wants, so the choice has to stay reachable.
+    /// </remarks>
+    public bool ShowTaskChoice => WorkflowTasks.Count > 1;
+
+    public int SelectedTaskIndex
+    {
+        get => Math.Max(0, WorkflowTasks.ToList().IndexOf(_task));
+        set { if (value >= 0 && value < WorkflowTasks.Count) Task = WorkflowTasks[value]; }
+    }
+
+    /// <summary>
+    /// Move the running task to one the current workflow and model both allow.
+    /// </summary>
+    private void ResolveTask()
+    {
+        var workflow = Workflow.For(_workflow);
+        var declared = _selectedEntry?.Family.Tasks;
+
+        var resolved = declared is not null
+            ? workflow.Tasks.FirstOrDefault(t => declared.Contains(t))
+            : null;
+
+        Task = resolved ?? (workflow.Tasks.Contains(_task) ? _task : workflow.Tasks[0]);
+        Notify(nameof(SelectedTaskIndex));
+    }
+
+    /// <summary>
+    /// Narrow the picker to the current workflow, keeping the selection if it
+    /// still applies.
+    /// </summary>
+    /// <remarks>
+    /// By workflow rather than by task: a family declares the tasks it can do,
+    /// and someone who has picked "audio analysis" wants every model that does
+    /// any of them. Filtering by one task hid models that could do the work
+    /// under a sibling task of the same workflow.
+    /// </remarks>
     private void FilterCatalog()
     {
         if (AllEntries.Count == 0) return;
 
+        var tasks = Workflow.For(_workflow).Tasks;
         var keep = _selectedEntry;
         CatalogEntries.Clear();
-        foreach (var entry in AllEntries.Where(e => e.SupportsTask(_task)))
+        foreach (var entry in AllEntries.Where(e => tasks.Any(e.SupportsTask)))
         {
             CatalogEntries.Add(entry);
         }
 
         SelectedEntry = keep is not null && CatalogEntries.Contains(keep) ? keep : null;
+        RefreshWorkflowCounts();
         Notify(nameof(CatalogCount));
     }
 
     public string CatalogCount =>
-        $"{CatalogEntries.Count} package(s) for {_task}, {AllEntries.Count} in all.";
-
-    private static string TitleFor(string task) => Resources.Strings.TaskChip(task);
+        $"{CatalogEntries.Count} package(s) for "
+        + $"{Resources.Strings.WorkflowLabel(Workflow.For(_workflow))}, "
+        + $"{AllEntries.Count} in all.";
 
     /// <summary>
     /// The structured result as JSON, which the web UI shows beside the plain
@@ -878,10 +995,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Headline for the current task, as the web UI's hero block shows it.</summary>
-    public string TaskTitle => Resources.Strings.TaskTitle(_task);
+    /// <summary>
+    /// Headline for the hero block: the task of the model that is selected, or
+    /// the studio's own name before anything is.
+    /// </summary>
+    /// <remarks>
+    /// The task rather than the workflow, because that is the specific thing
+    /// about to run. The workflow is already named by the chip above it, and
+    /// repeating it would waste the one line that could say "Voice cloning"
+    /// instead of "Text to speech".
+    /// </remarks>
+    public string StudioTitle => _selectedEntry is null && !_isLoaded
+        ? Resources.Strings.StudioTitle
+        : Resources.Strings.TaskName(_task);
 
-    public string TaskBlurb => Resources.Strings.TaskBlurb(_task);
+    public string StudioBlurb => Resources.Strings.WorkflowBlurb(Workflow.For(_workflow));
 
     public string TaskBadge => _task.ToUpperInvariant();
 
@@ -889,17 +1017,30 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     // the reference UI hardcodes it per task too -- so it lives in one place
     // here rather than being spread through the layout.
 
-    /// <summary>Synthesis needs text; alignment needs the transcript to align.</summary>
-    public bool ShowText => _task is "tts" or "align";
+    /// <summary>
+    /// Which tasks are written to rather than listened to.
+    /// </summary>
+    /// <remarks>
+    /// Synthesis and music generation take a prompt, voice design takes a
+    /// description, alignment takes the transcript to align, and speech editing
+    /// takes the words to put in place of the ones in the recording. Cloning
+    /// takes both text and a reference, which is why it is in this list and in
+    /// the audio one.
+    /// </remarks>
+    public bool ShowText => _task is "tts" or "clon" or "align" or "gen" or "vdes" or "s2s";
 
-    /// <summary>A voice only means something to a family that synthesises one.</summary>
-    public bool ShowVoice => _task == "tts";
+    /// <summary>A voice only means something to a family that produces one.</summary>
+    public bool ShowVoice => _task is "tts" or "clon" or "vc" or "svc" or "vdes";
 
     /// <summary>Long-text splitting is a property of synthesis, not of audio input.</summary>
-    public bool ShowTextChunking => _task == "tts";
+    public bool ShowTextChunking => _task is "tts" or "clon";
 
-    /// <summary>Everything except synthesis reads audio.</summary>
-    public bool ShowAudioInput => _task != "tts";
+    /// <summary>
+    /// Everything that reads audio. Synthesis, music generation and voice
+    /// design start from text alone; cloning and conversion need a recording
+    /// to imitate or transform.
+    /// </summary>
+    public bool ShowAudioInput => _task is not ("tts" or "gen" or "vdes");
 
     /// <summary>
     /// Live transcription and long-clip chunking are both ASR concerns. Showing
@@ -1104,13 +1245,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     ? RequestOptions : SessionOptions).Add(option);
             }
 
-            for (var i = 0; i < TaskChips.Count; i++)
+            // A loaded model settles the task, and can settle the workflow too:
+            // loading a separation model while the studio shows ASR should move
+            // to what the model actually does rather than leave a task it
+            // cannot run.
+            if (supported.Count > 0 && !supported.Contains(Task))
             {
-                var chip = TaskChips[i];
-                TaskChips[i] = chip with { Count = supported.Contains(chip.Task) ? 1 : 0 };
+                var preferred = Workflow.For(_workflow).Tasks.FirstOrDefault(supported.Contains)
+                                ?? supported[0];
+                if (!Workflow.For(_workflow).Tasks.Contains(preferred))
+                {
+                    CurrentWorkflow = Workflow.ForTask(preferred).Id;
+                }
+                Task = preferred;
+                Notify(nameof(SelectedTaskIndex));
             }
-
-            if (supported.Count > 0 && !supported.Contains(Task)) Task = supported[0];
             Notify(nameof(SelectedChip));
             Notify(nameof(LoadedModelName));
             Notify(nameof(LoadedModelState));
@@ -1755,7 +1904,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _outputSamples = null;
         IsLoaded = false;
 
-        for (var i = 0; i < TaskChips.Count; i++) TaskChips[i] = TaskChips[i] with { Count = 0 };
+        Notify(nameof(StudioTitle));
 
         Notify(nameof(LoadedModelName));
         Notify(nameof(LoadedModelState));
@@ -2477,7 +2626,7 @@ public readonly record struct ResultRow(
 
 /// <summary>One entry in the task selector: a display title and how many of the
 /// loaded model's tasks it covers.</summary>
-public sealed record TaskChip(string Task, string Title, int Count);
+public sealed record WorkflowChip(string Workflow, string Title, int Count);
 
 /// <summary>An option whose stable identity and shown label differ.</summary>
 /// <remarks>

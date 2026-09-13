@@ -116,8 +116,17 @@
   <data name="studio.model" xml:space="preserve">
     <value>Modello</value>
   </data>
+  <data name="studio.subtitle.analysis" xml:space="preserve">
+    <value>Analizza attività vocale, parlanti, tempi e allineamento dell'audio.</value>
+  </data>
   <data name="studio.subtitle.asr" xml:space="preserve">
     <value>Trascrivi l'audio parlato in testo, con controlli di lingua e timestamp quando supportati.</value>
+  </data>
+  <data name="studio.subtitle.design" xml:space="preserve">
+    <value>Crea o perfeziona una voce da una descrizione e dai controlli di riferimento supportati.</value>
+  </data>
+  <data name="studio.subtitle.music" xml:space="preserve">
+    <value>Crea musica e suoni da una descrizione, un testo o un audio di riferimento.</value>
   </data>
   <data name="studio.subtitle.sep" xml:space="preserve">
     <value>Separa una registrazione in voce, strumenti o altre tracce audio disponibili.</value>
@@ -125,23 +134,47 @@
   <data name="studio.subtitle.tts" xml:space="preserve">
     <value>Genera una voce naturale dal testo, con voci predefinite e clonazione quando supportate.</value>
   </data>
+  <data name="studio.subtitle.vc" xml:space="preserve">
+    <value>Trasforma una registrazione in un'altra voce conservando l'interpretazione parlata o cantata.</value>
+  </data>
+  <data name="studio.title" xml:space="preserve">
+    <value>Studio audio</value>
+  </data>
   <data name="task.align" xml:space="preserve">
     <value>Allineamento forzato</value>
   </data>
   <data name="task.asr" xml:space="preserve">
     <value>Trascrizione</value>
   </data>
+  <data name="task.clon" xml:space="preserve">
+    <value>Clonazione vocale</value>
+  </data>
   <data name="task.diar" xml:space="preserve">
     <value>Diarizzazione parlanti</value>
   </data>
+  <data name="task.gen" xml:space="preserve">
+    <value>Generazione musicale</value>
+  </data>
+  <data name="task.s2s" xml:space="preserve">
+    <value>Modifica del parlato</value>
+  </data>
   <data name="task.sep" xml:space="preserve">
     <value>Separazione sorgenti</value>
+  </data>
+  <data name="task.svc" xml:space="preserve">
+    <value>Conversione della voce cantata</value>
   </data>
   <data name="task.tts" xml:space="preserve">
     <value>Sintesi vocale</value>
   </data>
   <data name="task.vad" xml:space="preserve">
     <value>Attività vocale</value>
+  </data>
+  <data name="task.vc" xml:space="preserve">
+    <value>Conversione vocale</value>
+  </data>
+  <data name="task.vdes" xml:space="preserve">
+    <value>Progettazione voce</value>
   </data>
   <data name="theme.dark" xml:space="preserve">
     <value>Scuro</value>
@@ -167,13 +200,25 @@
   <data name="voice.reference" xml:space="preserve">
     <value>Voce di riferimento</value>
   </data>
+  <data name="workflow.analysis" xml:space="preserve">
+    <value>Analisi audio</value>
+  </data>
   <data name="workflow.asr" xml:space="preserve">
     <value>ASR / Trascrizione</value>
+  </data>
+  <data name="workflow.design" xml:space="preserve">
+    <value>Progettazione voce</value>
+  </data>
+  <data name="workflow.music" xml:space="preserve">
+    <value>Generazione musicale</value>
   </data>
   <data name="workflow.sep" xml:space="preserve">
     <value>Separazione sorgenti</value>
   </data>
   <data name="workflow.tts" xml:space="preserve">
     <value>Sintesi vocale</value>
+  </data>
+  <data name="workflow.vc" xml:space="preserve">
+    <value>Conversione vocale</value>
   </data>
 </root>

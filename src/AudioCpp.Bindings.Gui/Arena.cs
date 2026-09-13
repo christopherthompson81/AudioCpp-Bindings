@@ -60,7 +60,12 @@ public sealed class Arena : INotifyPropertyChanged
     public ArenaSlot Left { get; } = new("A");
     public ArenaSlot Right { get; } = new("B");
 
-    public IReadOnlyList<string> Tasks { get; } = ["asr", "tts", "diar", "sep", "align", "vad"];
+    /// <summary>
+    /// Every engine task, so the arena can compare any two models the studio
+    /// can run. Was its own hand-kept list of six, which drifted from the
+    /// studio's the moment the studio gained the other seven.
+    /// </summary>
+    public IReadOnlyList<string> Tasks { get; } = Workflow.AllTasks;
 
     public string AudioPath { get => _audioPath; set => Set(ref _audioPath, value); }
     public string Text { get => _text; set => Set(ref _text, value); }

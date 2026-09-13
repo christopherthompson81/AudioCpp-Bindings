@@ -179,11 +179,77 @@
   <data name="label.builtInChunking" xml:space="preserve">
     <value>⟦Búílt-ín chúnkíng (clíps óvér 5 mín)⟧</value>
   </data>
-  <data name="task.asr" xml:space="preserve">
-    <value>⟦Tránscríptíón⟧</value>
+  <data name="workflow.tts" xml:space="preserve">
+    <value>⟦Téxt tó spééch⟧</value>
+  </data>
+  <data name="workflow.asr" xml:space="preserve">
+    <value>⟦ÁSR / Tránscríptíón⟧</value>
+  </data>
+  <data name="workflow.music" xml:space="preserve">
+    <value>⟦Músíc générátíón⟧</value>
+  </data>
+  <data name="workflow.vc" xml:space="preserve">
+    <value>⟦Vóícé cónvérsíón⟧</value>
+  </data>
+  <data name="workflow.sep" xml:space="preserve">
+    <value>⟦Sóúrcé sépárátíón⟧</value>
+  </data>
+  <data name="workflow.analysis" xml:space="preserve">
+    <value>⟦Áúdíó ánálýsís⟧</value>
+  </data>
+  <data name="workflow.design" xml:space="preserve">
+    <value>⟦Vóícé désígn⟧</value>
+  </data>
+  <data name="studio.title" xml:space="preserve">
+    <value>⟦Áúdíó stúdíó⟧</value>
+  </data>
+  <data name="studio.subtitle.tts" xml:space="preserve">
+    <value>⟦Généráté nátúrál spééch fróm téxt, wíth vóícé préséts ánd clóníng whén súppórtéd.⟧</value>
+  </data>
+  <data name="studio.subtitle.asr" xml:space="preserve">
+    <value>⟦Tránscríbé spókén áúdíó íntó téxt, wíth lángúágé ánd tíméstámp cóntróls whén súppórtéd.⟧</value>
+  </data>
+  <data name="studio.subtitle.music" xml:space="preserve">
+    <value>⟦Créáté músíc ánd sóúnd fróm á prómpt, lýrícs, ór référéncé áúdíó whén súppórtéd.⟧</value>
+  </data>
+  <data name="studio.subtitle.vc" xml:space="preserve">
+    <value>⟦Tránsfórm á récórdíng íntó ánóthér vóícé whílé présérvíng thé spókén ór súng pérfórmáncé.⟧</value>
+  </data>
+  <data name="studio.subtitle.sep" xml:space="preserve">
+    <value>⟦Splít á récórdíng íntó vócáls, ínstrúménts, ór óthér áváíláblé áúdíó stéms.⟧</value>
+  </data>
+  <data name="studio.subtitle.analysis" xml:space="preserve">
+    <value>⟦Ánálýzé áúdíó fór spééch áctívítý, spéákérs, tímíng, ánd álígnmént.⟧</value>
+  </data>
+  <data name="studio.subtitle.design" xml:space="preserve">
+    <value>⟦Créáté ór réfíné á vóícé fróm á wríttén déscríptíón ánd súppórtéd référéncé cóntróls.⟧</value>
   </data>
   <data name="task.tts" xml:space="preserve">
     <value>⟦Téxt tó spééch⟧</value>
+  </data>
+  <data name="task.clon" xml:space="preserve">
+    <value>⟦Vóícé clóníng⟧</value>
+  </data>
+  <data name="task.asr" xml:space="preserve">
+    <value>⟦Tránscríptíón⟧</value>
+  </data>
+  <data name="task.gen" xml:space="preserve">
+    <value>⟦Músíc générátíón⟧</value>
+  </data>
+  <data name="task.midi" xml:space="preserve">
+    <value>⟦Áúdíó tó MÍDÍ⟧</value>
+  </data>
+  <data name="task.vc" xml:space="preserve">
+    <value>⟦Vóícé cónvérsíón⟧</value>
+  </data>
+  <data name="task.svc" xml:space="preserve">
+    <value>⟦Síngíng vóícé cónvérsíón⟧</value>
+  </data>
+  <data name="task.s2s" xml:space="preserve">
+    <value>⟦Spééch édítíng⟧</value>
+  </data>
+  <data name="task.sep" xml:space="preserve">
+    <value>⟦Sóúrcé sépárátíón⟧</value>
   </data>
   <data name="task.vad" xml:space="preserve">
     <value>⟦Vóícé áctívítý⟧</value>
@@ -191,37 +257,10 @@
   <data name="task.diar" xml:space="preserve">
     <value>⟦Spéákér díárízátíón⟧</value>
   </data>
-  <data name="task.sep" xml:space="preserve">
-    <value>⟦Sóúrcé sépárátíón⟧</value>
-  </data>
   <data name="task.align" xml:space="preserve">
     <value>⟦Fórcéd álígnmént⟧</value>
   </data>
-  <data name="studio.subtitle.asr" xml:space="preserve">
-    <value>⟦Tránscríbé spókén áúdíó íntó téxt, wíth lángúágé ánd tíméstámp cóntróls whén súppórtéd.⟧</value>
-  </data>
-  <data name="studio.subtitle.tts" xml:space="preserve">
-    <value>⟦Généráté nátúrál spééch fróm téxt, wíth vóícé préséts ánd clóníng whén súppórtéd.⟧</value>
-  </data>
-  <data name="studio.subtitle.sep" xml:space="preserve">
-    <value>⟦Splít á récórdíng íntó vócáls, ínstrúménts, ór óthér áváíláblé áúdíó stéms.⟧</value>
-  </data>
-  <data name="task.vad.blurb" xml:space="preserve">
-    <value>⟦Fínd thé strétchés óf á récórdíng thát cóntáín spééch.⟧</value>
-  </data>
-  <data name="task.diar.blurb" xml:space="preserve">
-    <value>⟦Áttríbúté spééch tó spéákérs ácróss á récórdíng.⟧</value>
-  </data>
-  <data name="task.align.blurb" xml:space="preserve">
-    <value>⟦Álígn á knówn tránscrípt tó thé áúdíó ít wás spókén ín.⟧</value>
-  </data>
-  <data name="workflow.asr" xml:space="preserve">
-    <value>⟦ÁSR / Tránscríptíón⟧</value>
-  </data>
-  <data name="workflow.tts" xml:space="preserve">
-    <value>⟦Téxt tó spééch⟧</value>
-  </data>
-  <data name="workflow.sep" xml:space="preserve">
-    <value>⟦Sóúrcé sépárátíón⟧</value>
+  <data name="task.vdes" xml:space="preserve">
+    <value>⟦Vóícé désígn⟧</value>
   </data>
 </root>

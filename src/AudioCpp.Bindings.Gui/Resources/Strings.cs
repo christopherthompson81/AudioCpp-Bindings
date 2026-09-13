@@ -111,31 +111,30 @@ public static class Strings
     public static string BuiltInChunking => Get("label.builtInChunking");
 
     /// <summary>
-    /// Task text, by key rather than by convention.
+    /// A workflow's tab label and the blurb under the hero.
     /// </summary>
     /// <remarks>
-    /// A single "task.{id}.title" pattern would be tidier, but it would mean
-    /// inventing key names upstream does not use and giving up its translations
-    /// for all six tasks. Upstream also writes one blurb per workflow rather
-    /// than one per task, so the three analysis tasks — which this app
-    /// separates and upstream groups — have blurbs of ours and no translation.
+    /// Both are upstream keys for the same workflow id, so there is no mapping
+    /// table to keep in step — adding a workflow upstream means adding an id.
     /// </remarks>
-    private static readonly Dictionary<string, (string Title, string Blurb, string Chip)> Tasks = new()
+    public static string WorkflowLabel(Workflow workflow) => Get(workflow.LabelKey);
+
+    public static string WorkflowBlurb(Workflow workflow) => Get(workflow.BlurbKey);
+
+    /// <summary>
+    /// The name of one engine task.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to the id. Upstream's analysis workflow lists a "spk" task
+    /// its own catalogue has no label for, and showing "spk" is better than
+    /// showing nothing or pretending the task does not exist.
+    /// </remarks>
+    public static string TaskName(string task)
     {
-        ["asr"] = ("task.asr", "studio.subtitle.asr", "workflow.asr"),
-        ["tts"] = ("task.tts", "studio.subtitle.tts", "workflow.tts"),
-        ["sep"] = ("task.sep", "studio.subtitle.sep", "workflow.sep"),
-        ["vad"] = ("task.vad", "task.vad.blurb", "task.vad"),
-        ["diar"] = ("task.diar", "task.diar.blurb", "task.diar"),
-        ["align"] = ("task.align", "task.align.blurb", "task.align"),
-    };
+        var text = Get($"task.{task}");
+        return text == $"task.{task}" ? task : text;
+    }
 
-    public static string TaskTitle(string task) =>
-        Tasks.TryGetValue(task, out var keys) ? Get(keys.Title) : task;
-
-    public static string TaskBlurb(string task) =>
-        Tasks.TryGetValue(task, out var keys) ? Get(keys.Blurb) : string.Empty;
-
-    public static string TaskChip(string task) =>
-        Tasks.TryGetValue(task, out var keys) ? Get(keys.Chip) : task;
+    /// <summary>What the hero says when no model has been chosen yet.</summary>
+    public static string StudioTitle => Get("studio.title");
 }
