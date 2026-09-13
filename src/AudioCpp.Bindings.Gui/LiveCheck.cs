@@ -232,6 +232,13 @@ internal static class LiveCheck
                         number.Value = "";
                     }
 
+                    if (args.FirstOrDefault(a => a.StartsWith("theme="))?["theme=".Length..] is { } theme)
+                    {
+                        viewModel.Theme = theme;
+                        Console.WriteLine($"theme: {viewModel.Theme}");
+                        await Task.Delay(500);
+                    }
+
                     var task = args.FirstOrDefault(a => a.StartsWith("task="))?["task=".Length..] ?? "asr";
                     viewModel.Task = task;
                     await Task.Delay(400);

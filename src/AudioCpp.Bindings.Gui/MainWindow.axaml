@@ -38,6 +38,8 @@
 
         <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="14"
                     VerticalAlignment="Center">
+          <TextBlock Text="THEME" Classes="Eyebrow" VerticalAlignment="Center" />
+          <ComboBox ItemsSource="{Binding Themes}" SelectedItem="{Binding Theme}" MinWidth="96" />
           <TextBlock Text="{Binding AbiVersion}" Classes="Subtle" VerticalAlignment="Center" />
           <Border Background="{DynamicResource AppChip}" BorderBrush="{DynamicResource AppLine}"
                   BorderThickness="1" CornerRadius="20" Padding="12,5">

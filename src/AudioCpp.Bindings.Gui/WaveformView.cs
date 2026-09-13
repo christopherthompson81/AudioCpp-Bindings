@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 
 namespace AudioCpp.Bindings.Gui;
 
@@ -26,6 +27,14 @@ public sealed class WaveformView : Control
         AvaloniaProperty.Register<WaveformView, Action<double>?>(nameof(Seek));
 
     static WaveformView() => AffectsRender<WaveformView>(SamplesProperty, ProgressProperty);
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        // Colours are read at draw time, so a variant change needs a repaint;
+        // without this the control keeps whichever palette it first drew with.
+        ActualThemeVariantChanged += (_, _) => InvalidateVisual();
+    }
 
     public float[] Samples
     {
@@ -70,8 +79,16 @@ public sealed class WaveformView : Control
         Seek?.Invoke(Math.Clamp(x / Bounds.Width, 0, 1));
     }
 
+    /// <summary>
+    /// Resolve a theme brush for the variant actually in force.
+    /// </summary>
+    /// <remarks>
+    /// The variant matters: TryFindResource without one does not pick the
+    /// light or dark dictionary, so the waveform stayed dark navy on a light
+    /// background — invisible until the light theme was first rendered.
+    /// </remarks>
     private IBrush Brush(string key, Color fallback) =>
-        this.TryFindResource(key, out var found) && found is IBrush brush
+        this.TryFindResource(key, ActualThemeVariant, out var found) && found is IBrush brush
             ? brush : new SolidColorBrush(fallback);
 
     public override void Render(DrawingContext context)
