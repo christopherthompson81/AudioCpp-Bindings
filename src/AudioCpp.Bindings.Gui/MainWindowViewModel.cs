@@ -341,6 +341,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(TaskTitle));
             Notify(nameof(TaskBlurb));
             Notify(nameof(TaskBadge));
+            Notify(nameof(ShowText));
+            Notify(nameof(ShowVoice));
+            Notify(nameof(ShowTextChunking));
+            Notify(nameof(ShowAudioInput));
+            Notify(nameof(ShowAsrAudioControls));
+            RecordCommand.RaiseCanExecuteChanged();
             FilterCatalog();
         }
     }
@@ -436,6 +442,29 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     };
 
     public string TaskBadge => _task.ToUpperInvariant();
+
+    // Which inputs a task actually takes. The engine does not declare this --
+    // the reference UI hardcodes it per task too -- so it lives in one place
+    // here rather than being spread through the layout.
+
+    /// <summary>Synthesis needs text; alignment needs the transcript to align.</summary>
+    public bool ShowText => _task is "tts" or "align";
+
+    /// <summary>A voice only means something to a family that synthesises one.</summary>
+    public bool ShowVoice => _task == "tts";
+
+    /// <summary>Long-text splitting is a property of synthesis, not of audio input.</summary>
+    public bool ShowTextChunking => _task == "tts";
+
+    /// <summary>Everything except synthesis reads audio.</summary>
+    public bool ShowAudioInput => _task != "tts";
+
+    /// <summary>
+    /// Live transcription and long-clip chunking are both ASR concerns. Showing
+    /// them for diarisation or separation invites setting a control that is
+    /// silently ignored.
+    /// </summary>
+    public bool ShowAsrAudioControls => _task == "asr";
 
     /// <summary>Backend in the top-right pill, which reads CUDA once a session is live.</summary>
     public string BackendBadge => _backend.ToUpperInvariant();
@@ -728,6 +757,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                         return;
                     }
                     request.SetAudio(input.Samples, input.SampleRate, input.Channels);
+
+                    // Forced alignment needs both: the audio and the transcript to
+                    // align against it. Showing a text box whose value was never
+                    // sent is the same defect as showing a control a task ignores.
+                    if (Task == "align" && Text.Length > 0) request.SetText(Text, "en-us");
                 }
 
                 using var result = _session!.Run(request);
