@@ -51,6 +51,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private AudioPlayer? _player;
     private DispatcherTimer? _playTimer;
     private double _playProgress = -1;
+    private ResultRow? _selectedRow;
     private string _playStatus = "";
     private string _task = "asr";
     private string _audioPath = "";
@@ -180,6 +181,41 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public double PlayProgress { get => _playProgress; private set => Set(ref _playProgress, value); }
 
     public string PlayStatus { get => _playStatus; private set => Set(ref _playStatus, value); }
+
+    /// <summary>
+    /// Selecting a result row seeks the preview to it.
+    /// </summary>
+    /// <remarks>
+    /// The reason the rows carry sample offsets rather than only a formatted
+    /// span: a transcript line is a position in the audio, and being able to
+    /// jump to it is what makes a result inspectable rather than a wall of text.
+    /// </remarks>
+    public ResultRow? SelectedRow
+    {
+        get => _selectedRow;
+        set
+        {
+            if (!Set(ref _selectedRow, value)) return;
+            if (value is not { StartSample: >= 0 } row) return;
+            SeekToSample(row.StartSample);
+        }
+    }
+
+    /// <summary>
+    /// Seek the preview to an absolute sample offset in the source audio.
+    /// Opens a player if none is running, so a click works before Play is hit.
+    /// </summary>
+    private void SeekToSample(long sample)
+    {
+        if (_player is null && !TryOpenPlayer()) return;
+        if (_player is null) return;
+
+        // Offsets are in source frames; the player may hold a different clip
+        // only if the output replaced the input, in which case they still share
+        // a sample rate for every family seen so far.
+        _player.Position = sample;
+        UpdatePlayProgress();
+    }
 
     /// <summary>Handed to the waveform so a click seeks.</summary>
     public Action<double> SeekTo => fraction =>
@@ -709,17 +745,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 foreach (var segment in result.Segments)
                 {
                     rows.Add(new ResultRow("segment", Span(segment.StartSample, segment.EndSample),
-                        segment.Text, segment.Confidence.ToString("F3")));
+                        segment.Text, segment.Confidence.ToString("F3"),
+                        segment.StartSample, segment.EndSample));
                 }
                 foreach (var turn in result.SpeakerTurns)
                 {
                     rows.Add(new ResultRow("speaker", Span(turn.StartSample, turn.EndSample),
-                        turn.SpeakerId, turn.Confidence.ToString("F3")));
+                        turn.SpeakerId, turn.Confidence.ToString("F3"),
+                        turn.StartSample, turn.EndSample));
                 }
                 foreach (var word in result.Words)
                 {
                     rows.Add(new ResultRow("word", Span(word.StartSample, word.EndSample),
-                        word.Word, word.Confidence.ToString("F3")));
+                        word.Word, word.Confidence.ToString("F3"),
+                        word.StartSample, word.EndSample));
                 }
                 foreach (var stream in result.NamedAudio)
                 {
@@ -1126,29 +1165,33 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        if (_player is null)
-        {
-            var clip = _outputSamples is { Length: > 0 }
-                ? (_outputSamples, _outputSampleRate, _outputChannels)
-                : _inputClip;
-            if (clip is null) return;
-
-            try
-            {
-                _player = AudioPlayer.Open(clip.Value.Samples, clip.Value.SampleRate, clip.Value.Channels);
-            }
-            catch (Exception exception) when (exception is InvalidOperationException
-                                              or DllNotFoundException or ArgumentException)
-            {
-                PlayStatus = Describe(exception);
-                return;
-            }
-        }
+        if (_player is null && !TryOpenPlayer()) return;
+        if (_player is null) return;
 
         _player.Play();
         StartPlayTimer();
         Notify(nameof(PlayLabel));
         await System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    private bool TryOpenPlayer()
+    {
+        var clip = _outputSamples is { Length: > 0 }
+            ? (_outputSamples, _outputSampleRate, _outputChannels)
+            : _inputClip;
+        if (clip is null) return false;
+
+        try
+        {
+            _player = AudioPlayer.Open(clip.Value.Samples, clip.Value.SampleRate, clip.Value.Channels);
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException
+                                          or DllNotFoundException or ArgumentException)
+        {
+            PlayStatus = Describe(exception);
+            return false;
+        }
     }
 
     /// <summary>
@@ -1527,7 +1570,17 @@ public sealed class DeclaredOption(
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
-public readonly record struct ResultRow(string Kind, string Span, string Value, string Detail);
+/// <summary>
+/// One line of a result.
+/// </summary>
+/// <param name="StartSample">
+/// Kept alongside the formatted <paramref name="Span"/> so a click can seek.
+/// Formatting the offsets and discarding them is what made the rows
+/// unactionable in the first place; -1 means the row has no position.
+/// </param>
+public readonly record struct ResultRow(
+    string Kind, string Span, string Value, string Detail,
+    long StartSample = -1, long EndSample = -1);
 
 /// <summary>One entry in the task selector: a display title and how many of the
 /// loaded model's tasks it covers.</summary>

@@ -54,6 +54,26 @@ internal static class LiveCheck
             failures++;
         }
 
+        // Selecting a result row should seek the preview to it -- the whole
+        // reason the rows carry sample offsets.
+        var positioned = viewModel.Rows.FirstOrDefault(r => r.StartSample > 0);
+        if (positioned.StartSample > 0)
+        {
+            viewModel.SelectedRow = positioned;
+            await Task.Delay(50);
+            var expected = positioned.StartSample / (double)16000;
+            Console.WriteLine($"row seek: wanted {expected:F2}s, playhead at {viewModel.PlayStatus}");
+            if (viewModel.PlayProgress <= 0)
+            {
+                Console.Error.WriteLine("selecting a row did not move the playhead");
+                failures++;
+            }
+        }
+        else
+        {
+            Console.WriteLine("row seek: no positioned rows in this result, skipped");
+        }
+
         await viewModel.StopAudioAsync();
         return failures;
     }
