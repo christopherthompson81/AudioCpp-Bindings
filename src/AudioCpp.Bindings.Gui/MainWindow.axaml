@@ -6,6 +6,12 @@
         Title="audio.cpp — native studio" Width="1400" Height="940"
         Background="{DynamicResource AppBg}">
 
+  <!-- Ctrl+Enter runs, as the reference does. Worth having on a window where
+       the Run button is three columns away from the text you just typed. -->
+  <Window.KeyBindings>
+    <KeyBinding Gesture="Ctrl+Enter" Command="{Binding RunCommand}" />
+  </Window.KeyBindings>
+
   <DockPanel>
 
     <!-- Top bar: identity on the left, global settings on the right. -->
@@ -62,6 +68,39 @@
         <TextBlock Text="{Binding Status}" TextWrapping="Wrap" />
       </DockPanel>
     </Border>
+
+    <ScrollViewer Padding="20,16" IsVisible="{Binding IsRuntime}">
+      <StackPanel Spacing="16">
+        <StackPanel Spacing="4">
+          <TextBlock Text="RUNTIME" Classes="Eyebrow" Foreground="{DynamicResource AppAccent}" />
+          <TextBlock Text="Session log" Classes="Hero" />
+          <TextBlock Classes="Subtle" FontSize="13"
+                     Text="What this app asked the ABI to do, in order. The status line keeps only the last thing that happened." />
+        </StackPanel>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="8">
+            <TextBlock Text="STATE" Classes="Eyebrow" />
+            <TextBlock Text="{Binding RuntimeSummary}" Classes="Subtle" FontFamily="monospace"
+                       FontSize="12" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="8">
+            <TextBlock Text="EVENTS" Classes="Eyebrow" />
+            <DataGrid ItemsSource="{Binding SessionLog}" IsReadOnly="True" Height="420"
+                      GridLinesVisibility="Horizontal">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Time"    Binding="{Binding Time}"    Width="90" />
+                <DataGridTextColumn Header="Kind"    Binding="{Binding Kind}"    Width="90" />
+                <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
 
     <ScrollViewer Padding="20,16" IsVisible="{Binding IsArena}">
       <StackPanel Spacing="16" DataContext="{Binding Arena}">
@@ -486,7 +525,16 @@
               </Expander>
 
               <StackPanel Orientation="Horizontal" Spacing="12">
-                <Button Classes="Primary" Content="Run" Command="{Binding RunCommand}" />
+                <Button Classes="Primary" Command="{Binding RunCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="9">
+                    <TextBlock Text="Run" VerticalAlignment="Center" />
+                    <Border Background="{DynamicResource AppTextInvert}" CornerRadius="4"
+                            Padding="5,1" Opacity="0.22">
+                      <TextBlock Text="Ctrl ⏎" FontSize="10" VerticalAlignment="Center"
+                                 Foreground="{DynamicResource AppTextInvert}" />
+                    </Border>
+                  </StackPanel>
+                </Button>
                 <Button Content="Cancel" Command="{Binding CancelCommand}" />
                 <TextBlock Text="{Binding RunState}" Classes="Subtle"
                            VerticalAlignment="Center" />

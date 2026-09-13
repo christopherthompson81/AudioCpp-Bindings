@@ -319,7 +319,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Two configurations compared on one input.</summary>
     public Arena Arena { get; } = new();
 
-    public IReadOnlyList<string> Pages { get; } = ["Studio", "Arena"];
+    public IReadOnlyList<string> Pages { get; } = ["Studio", "Arena", "Runtime"];
 
     public IReadOnlyList<string> Themes { get; } = ["System", "Light", "Dark"];
 
@@ -417,11 +417,42 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (!Set(ref _page, value)) return;
             Notify(nameof(IsStudio));
             Notify(nameof(IsArena));
+            Notify(nameof(IsRuntime));
+            Notify(nameof(RuntimeSummary));
         }
     }
 
     public bool IsStudio => _page == "Studio";
     public bool IsArena => _page == "Arena";
+    public bool IsRuntime => _page == "Runtime";
+
+    /// <summary>
+    /// What the app asked the ABI to do, in order.
+    /// </summary>
+    /// <remarks>
+    /// The status line shows one thing at a time and the last one wins, so a
+    /// load that warned before a run that failed leaves no trace of the
+    /// warning. For a binding sample the sequence is the interesting part.
+    /// </remarks>
+    public ObservableCollection<LogEntry> SessionLog { get; } = [];
+
+    /// <summary>Backend, library and models resident right now.</summary>
+    public string RuntimeSummary =>
+        $"{AbiVersion}\nbackend {Backend}, {Threads} threads\n"
+        + $"studio: {(_model is null ? "nothing loaded" : LoadedModelName)}\n"
+        + $"arena A: {(Arena.Left.IsLoaded ? "loaded" : "empty")}   "
+        + $"arena B: {(Arena.Right.IsLoaded ? "loaded" : "empty")}";
+
+    private static string TimingBreakdownFor(long sessionMs, long runMs) =>
+        sessionMs > 0 ? $"session {sessionMs} ms, run {runMs} ms" : $"run {runMs} ms";
+
+    private void Log(string kind, string message)
+    {
+        SessionLog.Insert(0, new LogEntry(DateTime.Now.ToString("HH:mm:ss"), kind, message));
+        // A log that grows without bound is a leak with a nice name.
+        while (SessionLog.Count > 300) SessionLog.RemoveAt(SessionLog.Count - 1);
+        Notify(nameof(RuntimeSummary));
+    }
 
     /// <summary>Audio streams a run produced, each separately playable and saveable.</summary>
     public ObservableCollection<NamedAudioEntry> OutputStreams { get; } = [];
@@ -854,6 +885,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             IsLoaded = true;
             Status = $"Loaded {model.Family} — {Options.Count} declared option(s), read from the model."
                    + (_vadModel is not null ? $"  VAD: {_vadModel.Family}." : "");
+            Log("load", $"{model.Family} · {Options.Count} options · {LoadedModelWeights}");
         }
         catch (Exception exception)
         {
@@ -1046,6 +1078,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             foreach (var stream in streams) OutputStreams.Add(stream);
             Artifacts.Clear();
             foreach (var artifact in artifacts) Artifacts.Add(artifact);
+
+            Log("run", $"{Task} · {TimingBreakdownFor(sessionMs, runMs)} · "
+                       + $"{rows.Count} row(s), {streams.Count} stream(s)");
 
             TimingBreakdown = sessionMs > 0
                 ? $"session {sessionMs} ms · run {runMs} ms · total {_lastRunSeconds * 1000:F0} ms"
@@ -1466,6 +1501,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RecordCommand.RaiseCanExecuteChanged();
         PlayCommand.RaiseCanExecuteChanged();
         Status = "Unloaded. The model and its sessions are freed.";
+        Log("unload", "model, sessions and registry freed");
     }
 
     /// <summary>Release audio devices held for preview and capture.</summary>
@@ -2151,6 +2187,9 @@ public sealed record ArtifactEntry(string Id, string Kind, byte[] Payload, strin
 
 /// <summary>Which control suits a declared option.</summary>
 public enum OptionEditor { Choice, Toggle, Slider, Number, Text }
+
+/// <summary>One line of the session log.</summary>
+public readonly record struct LogEntry(string Time, string Kind, string Message);
 
 public readonly record struct ResultRow(
     string Kind, string Span, string Value, string Detail,
