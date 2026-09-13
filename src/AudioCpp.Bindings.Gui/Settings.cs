@@ -32,6 +32,17 @@ public sealed record Settings
     public string? FamilyHint { get; init; }
     public string? ModelsRoot { get; init; }
 
+    /// <summary>
+    /// The package chosen in each workflow, by <see cref="CatalogEntry.Key"/>.
+    /// </summary>
+    /// <remarks>
+    /// Per workflow rather than one selection: the picker is filtered by
+    /// workflow, so a single remembered package would be dropped the moment
+    /// the user looked at another tab, which is the thing that made switching
+    /// tabs feel like it forgot.
+    /// </remarks>
+    public Dictionary<string, string>? SelectedPackages { get; init; }
+
     public string? VadModelPath { get; init; }
     public string? VadAssetPath { get; init; }
     public double? MinSegmentSpan { get; init; }

@@ -271,7 +271,8 @@
                    77 families is not a list anyone scrolls. MinimumPrefixLength
                    is 0 so an empty box still drops down the whole list, which is
                    the browsing the ComboBox was good at. -->
-              <AutoCompleteBox ItemsSource="{Binding CatalogEntries}"
+              <AutoCompleteBox Name="PackagePicker"
+                               ItemsSource="{Binding CatalogEntries}"
                                SelectedItem="{Binding SelectedEntry}"
                                ItemFilter="{Binding EntryFilter}"
                                ValueMemberBinding="{Binding Title}"
@@ -279,6 +280,18 @@
                                MaxDropDownHeight="360"
                                HorizontalAlignment="Stretch"
                                PlaceholderText="choose a package…">
+                <!-- A chevron, so the control reads as a picker you can open as
+                     well as type into. Without one an AutoCompleteBox looks like
+                     a text box, and nothing says the whole list is one click
+                     away. -->
+                <AutoCompleteBox.InnerRightContent>
+                  <Button Name="PackagePickerToggle" Classes="PickerToggle"
+                          Click="OnTogglePackageList"
+                          ToolTip.Tip="Show every package for this workflow">
+                    <Path Data="M 0,0 L 5,5 L 10,0" Stroke="{DynamicResource AppTextSubtle}"
+                          StrokeThickness="1.4" Margin="0,2,0,0" />
+                  </Button>
+                </AutoCompleteBox.InnerRightContent>
                 <AutoCompleteBox.ItemTemplate>
                   <DataTemplate x:DataType="vm:CatalogEntry">
                     <StackPanel>

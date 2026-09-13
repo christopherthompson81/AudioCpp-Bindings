@@ -77,6 +77,31 @@ public partial class MainWindow : Window
         return file?.Path.LocalPath;
     }
 
+    /// <summary>
+    /// Open the package list without typing.
+    /// </summary>
+    /// <remarks>
+    /// The text is cleared first: the box filters on what it contains, so
+    /// opening it with a previous selection still in the field would show only
+    /// the packages matching that name rather than the whole list. The
+    /// selection itself is untouched — closing without choosing leaves it as
+    /// it was.
+    /// </remarks>
+    private void OnTogglePackageList(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (this.FindControl<AutoCompleteBox>("PackagePicker") is not { } picker) return;
+
+        if (picker.IsDropDownOpen)
+        {
+            picker.IsDropDownOpen = false;
+            return;
+        }
+
+        picker.Text = string.Empty;
+        picker.Focus();
+        picker.IsDropDownOpen = true;
+    }
+
     private async void OnPickModelFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel viewModel) await viewModel.PickModelAsync(directory: false);
