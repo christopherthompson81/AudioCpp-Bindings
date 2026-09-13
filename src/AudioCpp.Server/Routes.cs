@@ -52,29 +52,17 @@ internal static class Routes
         var clip = request.Audio;
         try
         {
-            var result = await pool.UseModelAsync(request.Model, (model, session) =>
+            var result = await RunWithLanguageAsync(pool, request.Model, request.Language,
+                (model, session, language) =>
             {
                 using var task = new AudioCppRequest();
                 task.SetAudio(clip.Samples, clip.SampleRate, clip.Channels);
 
-                // Only a language the caller chose, and only to a model whose
-                // contract declares the option. Clients send the field
-                // unconditionally, so without the guard a model that validates
-                // options strictly rejects the whole request over something the
-                // user never set -- Parakeet answers "unknown Parakeet TDT
-                // request option: language" and transcribes nothing.
-                //
-                // The guard has to cover set_text, not just set_option: the C
-                // ABI's set_text injects options["language"] as well as setting
-                // the transcript language, mirroring the CLI's --language
-                // (capi/audiocpp.cpp). So passing the language as the text
-                // language is not the safe alternative to passing it as an
-                // option -- it is the same thing. There is no way through this
-                // ABI to set one without the other, which is why a model that
-                // does not declare the option gets no language at all.
-                var accepts = model.GetOptions(AudioCppOptionScope.Request)
-                    .Any(option => option.Name == "language");
-                var language = accepts ? request.Language : "";
+                // set_text carries the language, and carrying it sets
+                // options["language"] too -- the two are one action through
+                // this ABI. Whether this model tolerates that is decided by
+                // RunWithLanguageAsync, which hands back the language to
+                // actually use.
                 if (language.Length > 0 || request.Context.Length > 0)
                 {
                     task.SetText(request.Context, language);
@@ -168,6 +156,166 @@ internal static class Routes
             return Problem(500, "engine_error", error.Message);
         }
     }
+
+    /// <summary>
+    /// Forced alignment: audio in, the words of a known transcript located
+    /// within it.
+    /// </summary>
+    private static async Task<IResult> AlignAsync(HttpRequest http, ModelPool pool,
+                                                  Action<string> log, CancellationToken cancel)
+    {
+        AlignmentRequest request;
+        try
+        {
+            request = await AlignmentRequest.ReadAsync(http);
+        }
+        catch (Exception error) when (error is InvalidDataException or IOException
+                                      or FormatException)
+        {
+            return Problem(400, "invalid_request_error", error.Message);
+        }
+
+        // 400 rather than the transcription route's 404, because that is what
+        // upstream answers here. The inconsistency is upstream's and is
+        // reproduced deliberately: a client that branches on the status code
+        // has to see the same code from both servers, and picking the tidier
+        // one would be a difference that only shows up in someone's error
+        // handling.
+        var spec = pool.Spec(request.Model);
+        if (spec is null)
+        {
+            return Problem(400, "invalid_request_error", $"unknown model id: {request.Model}");
+        }
+        if (spec.Task != "align")
+        {
+            return Problem(400, "invalid_request_error",
+                "audio alignment requires a model configured with task=align");
+        }
+        if (spec.Mode != "offline")
+        {
+            return Problem(400, "invalid_request_error",
+                "audio alignment requires a model configured with mode=offline");
+        }
+
+        var started = Stopwatch.StartNew();
+        var clip = request.Audio;
+        try
+        {
+            var result = await RunWithLanguageAsync(pool, request.Model, request.Language,
+                (model, session, language) =>
+            {
+                using var task = new AudioCppRequest();
+                task.SetAudio(clip.Samples, clip.SampleRate, clip.Channels);
+
+                // An aligner is the case that rules out guessing from the
+                // declared options: Qwen3's does not declare "language" and
+                // requires it anyway. Sending it and learning from a refusal is
+                // what serves both it and a strict family like Parakeet.
+                task.SetText(request.Text, language);
+
+                using var output = session.Run(task);
+                return new Transcribed(
+                    output.Text?.Text ?? "",
+                    output.Text?.Language ?? "",
+                    [.. output.Segments],
+                    [.. output.SpeakerTurns],
+                    [.. output.Words]);
+            }, cancel);
+
+            if (result.Words.Count == 0)
+            {
+                // Not a 500: the request was well formed and the model ran. It
+                // is a 502-shaped situation with no better code, and upstream
+                // surfaces it as an error rather than an empty word list, which
+                // a client would read as "no words in the audio".
+                return Problem(500, "engine_error", "alignment model produced no word timestamps");
+            }
+
+            var seconds = (double)clip.Samples.Length / Math.Max(clip.Channels, 1)
+                          / Math.Max(clip.SampleRate, 1);
+            var wall = started.Elapsed.TotalMilliseconds;
+            log($"POST /v1/audio/alignments  {request.Model}  {seconds:F2}s  {wall:F0} ms");
+
+            // Seconds and sample offsets both, which is this route's shape
+            // rather than an embellishment: an aligner's caller is placing
+            // words on a timeline and would otherwise divide every offset by a
+            // rate it has to look up in another field.
+            var rate = (double)Math.Max(clip.SampleRate, 1);
+            var payload = new Dictionary<string, object?>();
+            if (result.Text.Length > 0)
+            {
+                payload["text"] = result.Text;
+                // Nested under text upstream, so an empty transcript carries no
+                // language either. Kept that way rather than promoted.
+                if (result.Language.Length > 0) payload["language"] = result.Language;
+            }
+            payload["words"] = result.Words.Select(word => new
+            {
+                word = word.Word,
+                start = word.StartSample / rate,
+                end = word.EndSample / rate,
+                start_sample = word.StartSample,
+                end_sample = word.EndSample,
+                confidence = word.Confidence,
+            }).ToArray();
+            payload["timing"] = new
+            {
+                wall_ms = Math.Round(wall, 1),
+                audio_duration_ms = Math.Round(seconds * 1000.0, 1),
+                rtf = seconds > 0 ? Math.Round(wall / 1000.0 / seconds, 4) : 0.0,
+            };
+            return Results.Json(payload);
+        }
+        catch (OperationCanceledException)
+        {
+            return Results.Empty;
+        }
+        catch (AudioCppException error)
+        {
+            log($"POST /v1/audio/alignments  {request.Model}  failed: {error.Message}");
+            return Problem(500, "engine_error", error.Message);
+        }
+    }
+
+    /// <summary>
+    /// Runs work against a model, deciding whether the caller's language can go
+    /// with it and retrying once without it if the model says no.
+    /// </summary>
+    /// <remarks>
+    /// The retry exists because the question cannot be answered in advance —
+    /// see <see cref="ModelPool.RefusesLanguage"/>. It happens at most once per
+    /// model per server lifetime, and the refusal it recovers from is raised
+    /// during option validation, before the model does any work.
+    /// </remarks>
+    private static async Task<T> RunWithLanguageAsync<T>(
+        ModelPool pool, string id, string language,
+        Func<AudioCppModel, AudioCppSession, string, T> work,
+        CancellationToken cancel)
+    {
+        if (language.Length == 0 || pool.RefusesLanguage(id))
+        {
+            return await pool.UseModelAsync(id, (model, session) => work(model, session, ""), cancel);
+        }
+
+        try
+        {
+            return await pool.UseModelAsync(
+                id, (model, session) => work(model, session, language), cancel);
+        }
+        catch (AudioCppException error) when (RefusedTheLanguageOption(error))
+        {
+            pool.NoteLanguageRefused(id);
+            return await pool.UseModelAsync(id, (model, session) => work(model, session, ""), cancel);
+        }
+    }
+
+    /// <summary>
+    /// Matched on both halves, so an unrelated failure that happens to mention
+    /// a language is not mistaken for this one.
+    /// </summary>
+    private static bool RefusedTheLanguageOption(AudioCppException error) =>
+        error.Message.Contains("request option", StringComparison.Ordinal)
+        && error.Message.Contains("language", StringComparison.Ordinal);
 
     private sealed record Transcribed(
         string Text,
@@ -310,6 +458,19 @@ internal static class Routes
         app.MapPost("/v1/audio/transcriptions/details",
             (HttpRequest request, CancellationToken cancel) =>
                 TranscribeAsync(request, pool, log, detailed: true, cancel));
+
+        app.MapPost("/v1/audio/alignments",
+            (HttpRequest request, CancellationToken cancel) =>
+                AlignAsync(request, pool, log, cancel));
+
+        // A GET with the model in the query string, because a client calls it
+        // to populate a picker before it has anything to post.
+        app.MapGet("/v1/audio/voices", (HttpRequest request) =>
+        {
+            var id = request.Query["model"].ToString();
+            log($"GET /v1/audio/voices  {(id.Length > 0 ? id : "(unspecified)")}");
+            return Results.Json(new { voices = pool.VoicesFor(id) });
+        });
 
         // OpenAI's model list shape: clients iterate data[] and read id.
         app.MapGet("/v1/models", () =>

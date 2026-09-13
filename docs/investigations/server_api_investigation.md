@@ -135,3 +135,49 @@ the fix:
   `timestamp_granularities[]` as a matter of course — the engine rejects
   options it does not declare, so those would turn a valid request into a
   failed one.
+
+## Run 4 — 2026-09-13 18:20 — the language guard was wrong in the other direction
+
+**Command** — the alignment route's first end-to-end run, against
+`qwen3_forced_aligner` on CUDA with `-F language=en` as upstream's own example
+sends it.
+
+**Question** — does the declared-options guard from Run 2 generalise?
+
+**Raw finding**
+
+```
+FAIL  alignment is 200  {"error":{"message":"audiocpp_session_run: Qwen3 forced
+  aligner run() requires transcript text and language (runtime error)", ...
+```
+
+The guard dropped the language, because the aligner does not declare it:
+
+```json
+// model_specs/qwen3_forced_aligner.json
+"options": {"request": [{"name": "clamp_timestamps_to_audio", ...}]}
+```
+
+And yet `run()` refuses without it. So "does not declare `language`" means
+**must not send it** for Parakeet TDT and **must send it** for this aligner.
+The declaration does not distinguish the two, and Run 2's guard — which looked
+correct against the only model it was tested on — is wrong for every model of
+the second kind.
+
+**Why the two differ.** 35 families call
+`validate_spec_backed_request_options` (`include/engine/framework/runtime/spec_backed_model.h:59`),
+which throws on any key not in the contract. Parakeet is one. The aligner is
+not: it validates only its *session* options, so an undeclared `language`
+reaches it harmlessly — it is the missing transcript language, not the extra
+option, that it objects to.
+
+**Implication** — there is no static signal that answers the question, so the
+route stops guessing: it sends the language, and if the engine comes back with
+`unknown … request option: language`, it records that for the model id and
+retries once without. A strict family pays one failed validation per server
+lifetime — raised before any inference — and every later request is clean. A
+family that needs the language gets it.
+
+This makes the upstream case (#65) stronger than it looked in Run 2: the
+coupling in `set_text` is not merely undocumented, it is unresolvable from the
+client side. Noted on that issue.

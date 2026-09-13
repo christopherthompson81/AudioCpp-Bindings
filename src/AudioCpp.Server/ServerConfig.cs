@@ -23,12 +23,18 @@ public static class ServerLimits
 /// <param name="Path">Model file or directory.</param>
 /// <param name="Task">Engine task: tts, asr, vc, ...</param>
 /// <param name="Mode">offline or streaming.</param>
+/// <param name="VoicePresets">
+/// Named voices this model offers, which <c>GET /v1/audio/voices</c> lists.
+/// These are a server-config concept upstream too, not something read out of
+/// the model file — the C ABI exposes no way to enumerate a model's voices.
+/// </param>
 public sealed record ServerModel(
     string Id,
     string Family = "",
     string Path = "",
     string Task = "tts",
-    string Mode = "offline");
+    string Mode = "offline",
+    IReadOnlyList<string>? VoicePresets = null);
 
 /// <summary>
 /// What the server runs as, mirroring audio.cpp's server.json.
@@ -55,6 +61,18 @@ public sealed record ServerConfig
     /// short list.
     /// </remarks>
     public bool LazyLoad { get; init; } = true;
+
+    /// <summary>
+    /// A directory of .wav files offered as voices, by basename.
+    /// </summary>
+    /// <remarks>
+    /// Listed by the voices route, which is why it lands here rather than
+    /// waiting for the rest of the config surface: a voices route that cannot
+    /// see the voice library answers with a list that is wrong rather than
+    /// incomplete, and a client picking from it names a voice the speech route
+    /// then rejects.
+    /// </remarks>
+    public string VoiceDir { get; init; } = "";
 
     public IReadOnlyList<ServerModel> Models { get; init; } = [];
 }

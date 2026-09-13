@@ -35,6 +35,107 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
 
     public bool Knows(string id) => config.Models.Any(m => m.Id == id);
 
+    private readonly ConcurrentDictionary<string, bool> _refusesLanguage = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether this model has been seen to refuse a <c>language</c> request
+    /// option, so the next request can leave it out instead of finding out
+    /// again.
+    /// </summary>
+    /// <remarks>
+    /// Learned rather than declared, because neither answer is available up
+    /// front. The C ABI's set_text writes options["language"] as well as the
+    /// transcript language, so the two cannot be sent separately; and a model's
+    /// declared request options do not say which of them it needs:
+    ///
+    ///   - Parakeet TDT validates strictly against its spec, does not declare
+    ///     "language", and refuses any request carrying it.
+    ///   - Qwen3's forced aligner also does not declare "language" — and its
+    ///     run() *requires* the transcript language, refusing without it.
+    ///
+    /// So "not declared" means "must not send" for one and "must send" for the
+    /// other, and a guard built on the declaration alone breaks whichever it
+    /// was not written for. Sending it and remembering a refusal serves both:
+    /// the first request to a strict model pays one failed validation, which
+    /// happens before any inference, and every request after it is clean.
+    /// </remarks>
+    public bool RefusesLanguage(string id) => _refusesLanguage.ContainsKey(id);
+
+    /// <summary>Record that this model refused the language option.</summary>
+    public void NoteLanguageRefused(string id)
+    {
+        if (_refusesLanguage.TryAdd(id, true))
+        {
+            log($"{id} refuses the 'language' request option; omitting it from now on");
+        }
+    }
+
+    /// <summary>How a model was configured, or null if no such id.</summary>
+    public ServerModel? Spec(string id) => config.Models.FirstOrDefault(m => m.Id == id);
+
+    /// <summary>
+    /// Voice names a client can put in a speech request, from every source
+    /// that offers one.
+    /// </summary>
+    /// <remarks>
+    /// An unknown id is an empty list rather than an error, and so is an
+    /// omitted one when more than one model is configured — upstream's
+    /// behaviour, and the reasonable one for a route whose whole job is to
+    /// populate a picker. A picker that fails to load tells the user nothing;
+    /// an empty one tells them this model has no named voices, which is often
+    /// true.
+    ///
+    /// Sorted and deduplicated, because the same name can arrive from a
+    /// configured preset and from the voice directory, and a picker showing it
+    /// twice looks like two different voices.
+    /// </remarks>
+    public IReadOnlyList<string> VoicesFor(string id)
+    {
+        var voices = new SortedSet<string>(StringComparer.Ordinal);
+
+        var spec = id.Length > 0
+            ? Spec(id)
+            : config.Models.Count == 1 ? config.Models[0] : null;
+        if (spec is not null)
+        {
+            foreach (var preset in spec.VoicePresets ?? []) voices.Add(preset);
+
+            // Families that keep voices as embeddings beside the weights.
+            // Upstream looks under the configured path, which for it is a model
+            // directory; ours is usually a .gguf file, so the file's own
+            // directory is checked too. That is a superset of upstream's answer
+            // for the same model, never a different one.
+            AddStems(Path.Combine(spec.Path, "embeddings"), "*.safetensors", voices);
+            var beside = Path.GetDirectoryName(spec.Path);
+            if (!string.IsNullOrEmpty(beside))
+            {
+                AddStems(Path.Combine(beside, "embeddings"), "*.safetensors", voices);
+            }
+        }
+
+        AddStems(config.VoiceDir, "*.wav", voices);
+        return [.. voices];
+    }
+
+    private void AddStems(string directory, string pattern, SortedSet<string> into)
+    {
+        if (directory.Length == 0 || !Directory.Exists(directory)) return;
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, pattern))
+            {
+                into.Add(Path.GetFileNameWithoutExtension(file));
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // A voice directory that cannot be read is an empty one. This route
+            // populates a picker; failing the whole request because one of
+            // three sources is unreadable would hide the two that worked.
+            log($"could not read voices from {directory}: {error.Message}");
+        }
+    }
+
     /// <summary>
     /// Run something with the model itself as well as its session, for a route
     /// that has to ask the model about its own contract.
