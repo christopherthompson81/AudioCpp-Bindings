@@ -122,6 +122,26 @@ internal static class LiveCheck
                         }
                     }
 
+                    // Round-trip check: a typed control must land on the same
+                    // DeclaredOption the run path reads, and returning it to the
+                    // model's default must clear it so the request stays minimal.
+                    if (viewModel.SessionOptions.FirstOrDefault(o => o.IsChoice) is { } choice)
+                    {
+                        var other = choice.Choices.FirstOrDefault(c => c != choice.DefaultDisplay);
+                        choice.Choice = other;
+                        var shared = viewModel.Options.First(o => o.Name == choice.Name);
+                        Console.WriteLine($"roundtrip: set {choice.Name}={other} -> "
+                                          + $"Value='{shared.Value}' (shared instance: {ReferenceEquals(shared, choice)})");
+                        choice.Choice = choice.DefaultDisplay;
+                        Console.WriteLine($"roundtrip: back to default -> Value='{shared.Value}' (expect empty)");
+                    }
+                    if (viewModel.RequestOptions.FirstOrDefault(o => o.IsNumber) is { } number)
+                    {
+                        number.NumberValue = 42;
+                        Console.WriteLine($"roundtrip: set {number.Name}=42 -> Value='{number.Value}'");
+                        number.Value = "";
+                    }
+
                     var task = args.FirstOrDefault(a => a.StartsWith("task="))?["task=".Length..] ?? "asr";
                     viewModel.Task = task;
                     await Task.Delay(400);
