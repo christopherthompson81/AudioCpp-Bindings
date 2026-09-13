@@ -27,15 +27,32 @@ struct audiocapture_device {
     _Atomic float peak;
 };
 
-/* One context for the process: opening a device per call would re-enumerate. */
+/*
+ * One context for the process: opening a device per call would re-enumerate.
+ *
+ * The mutex guards both the lazy init and the device list, because a caller is
+ * free to enumerate on one thread while opening on another, and the list is
+ * memory the context owns and rewrites on every refresh.
+ */
 static ma_context g_context;
 static int        g_context_ready = 0;
+static ma_mutex   g_lock;
+static int        g_lock_ready = 0;
 static ma_device_info * g_capture_devices = NULL;
 static ma_uint32        g_capture_count = 0;
+
+static void lock_devices(void) {
+    if (g_lock_ready) ma_mutex_lock(&g_lock);
+}
+
+static void unlock_devices(void) {
+    if (g_lock_ready) ma_mutex_unlock(&g_lock);
+}
 
 static int ensure_context(void) {
     if (g_context_ready) return 1;
     if (ma_context_init(NULL, 0, NULL, &g_context) != MA_SUCCESS) return 0;
+    if (ma_mutex_init(&g_lock) == MA_SUCCESS) g_lock_ready = 1;
     g_context_ready = 1;
     return 1;
 }
@@ -52,33 +69,44 @@ const char * audiocapture_backend(void) {
 int audiocapture_refresh_devices(void) {
     if (!ensure_context()) return 0;
 
+    lock_devices();
     ma_device_info * playback = NULL;
     ma_uint32 playback_count = 0;
     if (ma_context_get_devices(&g_context, &playback, &playback_count,
                                &g_capture_devices, &g_capture_count) != MA_SUCCESS) {
         g_capture_devices = NULL;
         g_capture_count = 0;
-        return 0;
     }
-    return (int)g_capture_count;
+    const int count = (int)g_capture_count;
+    unlock_devices();
+    return count;
 }
 
 int audiocapture_device_count(void) {
-    return (int)g_capture_count;
+    lock_devices();
+    const int count = (int)g_capture_count;
+    unlock_devices();
+    return count;
 }
 
 const char * audiocapture_device_name(int index) {
-    if (g_capture_devices == NULL || index < 0 || (ma_uint32)index >= g_capture_count) {
-        return "";
+    lock_devices();
+    const char * name = "";
+    if (g_capture_devices != NULL && index >= 0 && (ma_uint32)index < g_capture_count) {
+        name = g_capture_devices[index].name;
     }
-    return g_capture_devices[index].name;
+    unlock_devices();
+    return name;
 }
 
 int audiocapture_device_is_default(int index) {
-    if (g_capture_devices == NULL || index < 0 || (ma_uint32)index >= g_capture_count) {
-        return 0;
+    lock_devices();
+    int is_default = 0;
+    if (g_capture_devices != NULL && index >= 0 && (ma_uint32)index < g_capture_count) {
+        is_default = g_capture_devices[index].isDefault ? 1 : 0;
     }
-    return g_capture_devices[index].isDefault ? 1 : 0;
+    unlock_devices();
+    return is_default;
 }
 
 /*
@@ -131,9 +159,21 @@ audiocapture_device * audiocapture_open(
         if (err != NULL && err_len > 0) snprintf(err, err_len, "no audio backend available");
         return NULL;
     }
-    if (device_index >= 0 && (g_capture_devices == NULL || (ma_uint32)device_index >= g_capture_count)) {
-        if (err != NULL && err_len > 0) snprintf(err, err_len, "device index out of range");
-        return NULL;
+    /* Copy the id rather than pointing into the shared list: a refresh on
+       another thread rewrites that memory, and miniaudio would read it after we
+       had let go of the lock. */
+    ma_device_id chosen_id;
+    int have_id = 0;
+    if (device_index >= 0) {
+        lock_devices();
+        if (g_capture_devices == NULL || (ma_uint32)device_index >= g_capture_count) {
+            unlock_devices();
+            if (err != NULL && err_len > 0) snprintf(err, err_len, "device index out of range");
+            return NULL;
+        }
+        chosen_id = g_capture_devices[device_index].id;
+        have_id = 1;
+        unlock_devices();
     }
 
     audiocapture_device * self = (audiocapture_device *)ma_malloc(sizeof(*self), NULL);
@@ -157,8 +197,8 @@ audiocapture_device * audiocapture_open(
     config.sampleRate       = (ma_uint32)sample_rate;
     config.dataCallback     = on_frames;
     config.pUserData        = self;
-    if (device_index >= 0) {
-        config.capture.pDeviceID = &g_capture_devices[device_index].id;
+    if (have_id) {
+        config.capture.pDeviceID = &chosen_id;
     }
 
     const ma_result result = ma_device_init(&g_context, &config, &self->device);

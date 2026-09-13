@@ -10,6 +10,69 @@ namespace AudioCpp.CaptureTest;
 /// </summary>
 internal static class Program
 {
+    /// <summary>
+    /// Hammer the paths the UI will overlap: enumeration on one thread, open and
+    /// read on others, dispose landing mid-read.
+    /// </summary>
+    /// <remarks>
+    /// This is a smoke test, not a proof. Removing the lock inside Read and
+    /// running 250 rounds with eight readers still passed, because the window
+    /// between the disposed check and the native call is nanoseconds and freed
+    /// memory stays mapped. The lock is kept because ma_pcm_rb is documented
+    /// single-producer/single-consumer and concurrent readers corrupt it
+    /// silently rather than crashing — which is exactly the failure a test like
+    /// this cannot see.
+    /// </remarks>
+    private static int ConcurrencyCheck()
+    {
+        const int rounds = 60;
+        Console.WriteLine($"concurrency: {rounds} rounds of reads racing dispose");
+        var failures = 0;
+
+        for (var round = 0; round < rounds; round++)
+        {
+            CaptureSession session;
+            try { session = AudioCapture.Open(); }
+            catch (InvalidOperationException) { continue; }   // device busy; not our failure
+
+            session.Start();
+
+            using var stop = new CancellationTokenSource();
+            var readers = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+            {
+                var buffer = new float[1024];
+                while (!stop.Token.IsCancellationRequested)
+                {
+                    try { session.Read(buffer); session.TakePeak(); session.TakeOverruns(); }
+                    catch (ObjectDisposedException) { return; }   // expected once disposed
+                }
+            })).ToArray();
+
+            var enumerator = Task.Run(() =>
+            {
+                while (!stop.Token.IsCancellationRequested) AudioCapture.Devices();
+            });
+
+            Thread.Sleep(Random.Shared.Next(0, 4));
+            session.Dispose();          // lands while the readers are in flight
+            stop.Cancel();
+
+            try { Task.WaitAll([.. readers, enumerator], TimeSpan.FromSeconds(5)); }
+            catch (AggregateException error)
+            {
+                foreach (var inner in error.InnerExceptions)
+                {
+                    if (inner is ObjectDisposedException) continue;
+                    Console.Error.WriteLine($"  round {round}: {inner.GetType().Name}: {inner.Message}");
+                    failures++;
+                }
+            }
+        }
+
+        Console.WriteLine(failures == 0 ? "concurrency OK" : $"concurrency: {failures} failure(s)");
+        return failures;
+    }
+
     private static int Main(string[] args)
     {
         int backendOk;
@@ -88,6 +151,11 @@ internal static class Program
             Console.Error.WriteLine("  expected a signal but captured silence");
             failures++;
         }
+
+        // The UI polls Read on a timer while Stop and Dispose run on the UI
+        // thread, so those paths must survive overlapping. Without the gate
+        // this hands a freed handle to the native side.
+        failures += ConcurrencyCheck();
 
         if (failures > 0) { Console.Error.WriteLine($"{failures} problem(s)"); return 1; }
         Console.WriteLine("capture OK");

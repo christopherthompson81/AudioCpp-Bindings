@@ -64,6 +64,12 @@ public static class AudioCapture
 /// </summary>
 public sealed unsafe class CaptureSession : IDisposable
 {
+    // Read runs on whatever thread polls -- a UI timer, typically -- while Stop
+    // and Dispose run on the UI thread. Without this, a poll in flight can hand
+    // a freed handle to the native side. The lock is only ever held for the
+    // duration of a memcpy out of the ring buffer, so it does not serialise the
+    // audio thread, which never takes it.
+    private readonly Lock _gate = new();
     private IntPtr _handle;
 
     private CaptureSession(IntPtr handle, int sampleRate, int channels)
@@ -92,17 +98,23 @@ public sealed unsafe class CaptureSession : IDisposable
 
     public void Start()
     {
-        ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
-        if (NativeMethods.audiocapture_start(_handle) == 0)
-            throw new InvalidOperationException("could not start the capture device");
-        IsRunning = true;
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+            if (NativeMethods.audiocapture_start(_handle) == 0)
+                throw new InvalidOperationException("could not start the capture device");
+            IsRunning = true;
+        }
     }
 
     public void Stop()
     {
-        if (_handle == IntPtr.Zero) return;
-        NativeMethods.audiocapture_stop(_handle);
-        IsRunning = false;
+        lock (_gate)
+        {
+            if (_handle == IntPtr.Zero) return;
+            NativeMethods.audiocapture_stop(_handle);
+            IsRunning = false;
+        }
     }
 
     /// <summary>
@@ -112,13 +124,20 @@ public sealed unsafe class CaptureSession : IDisposable
     /// </summary>
     public int Read(Span<float> buffer)
     {
-        ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
         if (buffer.IsEmpty) return 0;
 
-        var frames = buffer.Length / Channels;
-        fixed (float* pointer = buffer)
+        // ma_pcm_rb is single-producer, single-consumer: the callback is the one
+        // producer, and this must be the one consumer. Concurrent readers would
+        // corrupt the buffer, so they are serialised rather than documented away.
+        lock (_gate)
         {
-            return (int)NativeMethods.audiocapture_read(_handle, pointer, (nuint)frames);
+            ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+
+            var frames = buffer.Length / Channels;
+            fixed (float* pointer = buffer)
+            {
+                return (int)NativeMethods.audiocapture_read(_handle, pointer, (nuint)frames);
+            }
         }
     }
 
@@ -127,19 +146,45 @@ public sealed unsafe class CaptureSession : IDisposable
     /// enough. Anything but zero means the recording has holes in it, which is
     /// worth showing rather than hiding.
     /// </summary>
-    public ulong TakeOverruns() =>
-        _handle == IntPtr.Zero ? 0 : NativeMethods.audiocapture_overruns(_handle);
+    public ulong TakeOverruns()
+    {
+        lock (_gate)
+        {
+            return _handle == IntPtr.Zero ? 0 : NativeMethods.audiocapture_overruns(_handle);
+        }
+    }
 
     /// <summary>Peak absolute sample since the last call, 0..1, for a meter.</summary>
-    public float TakePeak() =>
-        _handle == IntPtr.Zero ? 0f : NativeMethods.audiocapture_peak(_handle);
+    public float TakePeak()
+    {
+        lock (_gate)
+        {
+            return _handle == IntPtr.Zero ? 0f : NativeMethods.audiocapture_peak(_handle);
+        }
+    }
 
     public void Dispose()
     {
-        if (_handle == IntPtr.Zero) return;
-        var handle = _handle;
-        _handle = IntPtr.Zero;
-        IsRunning = false;
-        NativeMethods.audiocapture_close(handle);
+        Close();
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// A forgotten Dispose would otherwise hold the microphone open for the life
+    /// of the process, which on most desktops shows a recording indicator the
+    /// user cannot explain.
+    /// </summary>
+    ~CaptureSession() => Close();
+
+    private void Close()
+    {
+        lock (_gate)
+        {
+            if (_handle == IntPtr.Zero) return;
+            var handle = _handle;
+            _handle = IntPtr.Zero;
+            IsRunning = false;
+            NativeMethods.audiocapture_close(handle);
+        }
     }
 }
