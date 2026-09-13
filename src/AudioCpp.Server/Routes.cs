@@ -23,8 +23,7 @@ internal static class Routes
         Results.Json(new { error = new { message, type } }, statusCode: status);
 
 
-    public static void Map(WebApplication app, ModelPool pool, AudioCppServer server,
-                           Action<string> log)
+    public static void Map(WebApplication app, ModelPool pool, Action<string> log)
     {
         app.MapGet("/health", () =>
         {

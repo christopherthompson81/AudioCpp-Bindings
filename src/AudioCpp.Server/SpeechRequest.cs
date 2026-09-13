@@ -110,6 +110,22 @@ internal sealed record SpeechRequest
         _ => value.GetRawText(),
     };
 
+    /// <summary>
+    /// Decode the reference audio a request names.
+    /// </summary>
+    /// <remarks>
+    /// A path here is read on the server, from wherever the server can reach —
+    /// the same as the reference server, whose documented `voice_ref` is "a
+    /// plain path string (server-side file)". That is a real exposure if the
+    /// server is bound to anything but loopback: a client can make it open any
+    /// file it has permission to read, and a WAV that parses comes back shaped
+    /// as someone's voice.
+    ///
+    /// The default host is 127.0.0.1 for that reason. Binding wider is a
+    /// deliberate act, and a config that does it should restrict references to
+    /// a directory — which is what upstream's `voice_dir` is for, and is worth
+    /// having before this is exposed to a network.
+    /// </remarks>
     private static (float[], int, int)? ReadVoiceReference(JsonElement body)
     {
         if (!body.TryGetProperty("voice_ref", out var reference)) return null;

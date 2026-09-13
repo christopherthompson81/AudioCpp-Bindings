@@ -80,7 +80,7 @@ public sealed class AudioCppServer : IAsyncDisposable
                 kestrel.Listen(System.Net.IPAddress.Parse(config.Host), config.Port));
             var app = builder.Build();
 
-            Routes.Map(app, _pool, this, Write);
+            Routes.Map(app, _pool, Write);
 
             await app.StartAsync(cancel);
             _app = app;

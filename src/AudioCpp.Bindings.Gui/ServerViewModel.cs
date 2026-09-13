@@ -122,6 +122,17 @@ public sealed class ServerPage : INotifyPropertyChanged, IAsyncDisposable
 
     private async Task StartAsync()
     {
+        if (Models.FirstOrDefault(m => m.Path.Length == 0 || m.Id.Length == 0) is { } incomplete)
+        {
+            // Caught here rather than on the first request for it: lazy loading
+            // means that request could be hours away, and the mistake was made
+            // on this page.
+            Status = incomplete.Id.Length == 0
+                ? "Every model needs an id; that is what a client names."
+                : $"'{incomplete.Id}' has no path.";
+            return;
+        }
+
         Refresh();
         await _server.StartAsync(new ServerConfig
         {
@@ -174,7 +185,8 @@ public sealed class ServerPage : INotifyPropertyChanged, IAsyncDisposable
                 : $"{(int)response.StatusCode} {response.ReasonPhrase}";
         }
         catch (Exception exception) when (exception is HttpRequestException
-                                          or TaskCanceledException)
+                                          or TaskCanceledException
+                                          or ObjectDisposedException)
         {
             // Running by the flag and unreachable over HTTP is the case worth
             // showing: it means the process thinks it is serving and a client
@@ -198,8 +210,10 @@ public sealed class ServerPage : INotifyPropertyChanged, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         StopHealthPolling();
-        _http.Dispose();
+        // The server first: a poll in flight is answered rather than thrown at
+        // a disposed client.
         await _server.DisposeAsync();
+        _http.Dispose();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
