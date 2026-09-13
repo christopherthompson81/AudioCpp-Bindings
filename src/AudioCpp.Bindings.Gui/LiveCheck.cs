@@ -363,6 +363,39 @@ internal static class LiveCheck
                     Expect("and the timing", viewModel.Timing == timing);
                     Expect("and the subtitle commands", viewModel.SaveSrtCommand.CanExecute(null));
 
+                    // A row selected under one task must not survive into
+                    // another: setting it seeks the player, so a leftover row
+                    // would seek the incoming task's audio to an offset from
+                    // the outgoing one's.
+                    viewModel.CurrentWorkflow = "asr";
+                    await Task.Delay(200);
+                    viewModel.SelectedRow = viewModel.Rows.FirstOrDefault(r => r.StartSample > 0);
+                    var picked = viewModel.SelectedRow;
+                    viewModel.CurrentWorkflow = "sep";
+                    await Task.Delay(200);
+                    Console.WriteLine($"  selected row after switching: "
+                                      + $"{viewModel.SelectedRow?.Detail ?? "(none)"}");
+                    Expect("a selected row does not survive a task switch",
+                           picked is null || viewModel.SelectedRow is null);
+
+                    // A run whose task changed under it belongs to the task that
+                    // asked for it, not to whatever is on screen when it lands.
+                    viewModel.CurrentWorkflow = "asr";
+                    await Task.Delay(200);
+                    var inFlight = viewModel.RunCommand.ExecuteAsync();
+                    await Task.Delay(120);
+                    viewModel.CurrentWorkflow = "sep";
+                    await inFlight;
+                    await Task.Delay(200);
+                    Console.WriteLine($"  after switching mid-run, on {viewModel.Task}: "
+                                      + $"{viewModel.Rows.Count} row(s)");
+                    Expect("a run landing late does not fill the new task's panel",
+                           viewModel.Rows.Count == 0);
+                    viewModel.CurrentWorkflow = "asr";
+                    await Task.Delay(200);
+                    Console.WriteLine($"  and back on asr: {viewModel.Rows.Count} row(s)");
+                    Expect("it is kept under the task that ran it", viewModel.Rows.Count > 0);
+
                     // A family hint belongs to the package it came from. Left
                     // behind in a workflow that cannot run that family, a
                     // hand-picked model fails to load with a message about the

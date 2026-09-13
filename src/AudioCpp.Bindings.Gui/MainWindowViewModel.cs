@@ -967,6 +967,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _outputSampleRate = result.OutputSampleRate;
         _outputChannels = result.OutputChannels;
 
+        // Before the rows it points into are replaced. Setting it seeks the
+        // player, so a row left over from another task would seek the incoming
+        // task's audio to an offset from the outgoing one's.
+        _selectedRow = null;
+        Notify(nameof(SelectedRow));
+
         Rows.Clear();
         foreach (var row in result.Rows) Rows.Add(row);
         _words.Clear();
@@ -1430,6 +1436,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             : _vadModel is not null;
         Notify(nameof(CancelHint));
         CancelCommand.RaiseCanExecuteChanged();
+        // Nothing stops the task being switched while a run is in flight, and a
+        // result that arrives afterwards belongs to the task that asked for it,
+        // not to whatever is on screen when it lands.
+        var ranAs = Task;
+
         try
         {
             var started = DateTime.UtcNow;
@@ -1635,6 +1646,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             // produces nothing, and "the family produced no output for this
             // input" reads as a model problem rather than as the thing the user
             // just asked for.
+            if (Task != ranAs)
+            {
+                // Put it where it belongs and leave the visible panel showing
+                // the task the user actually switched to.
+                StashResult(ranAs);
+                RestoreResult(Task);
+                Log("run", $"{ranAs} finished after switching to {Task}; "
+                           + "its output is kept under the task that ran it.");
+                return;
+            }
+
             Status = _cancel?.IsCancellationRequested == true
                 ? _segmentedSummary.Length > 0
                     ? $"Cancelled.  {_segmentedSummary}"
