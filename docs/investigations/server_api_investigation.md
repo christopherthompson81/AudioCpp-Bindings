@@ -181,3 +181,41 @@ family that needs the language gets it.
 This makes the upstream case (#65) stronger than it looked in Run 2: the
 coupling in `set_text` is not merely undocumented, it is unresolvable from the
 client side. Noted on that issue.
+
+## Run 5 — 2026-09-13 19:30 — the reference server proves the ABI gap
+
+Reading upstream's `/v1/tasks/run` while implementing #59 turned up the piece
+that settles #65.
+
+`app/server/runtime.cpp:3045`:
+
+```cpp
+engine::runtime::TaskRequest drop_unsupported_language_option(
+    engine::runtime::TaskRequest request, const Value & request_json, bool accepts_language_option) {
+    if (accepts_language_option) return request;
+    ...
+    const auto it = request.options.find("language");
+    if (it != request.options.end() && it->second == top_level->as_string()) {
+        request.options.erase(it);          // the option only
+    }
+    return request;
+}
+```
+
+It erases `options["language"]` and leaves `text_input.language` alone. That is
+why the C++ server needs no probing: Parakeet TDT never sees the option, the
+forced aligner still gets its transcript language.
+
+**A C ABI client cannot write that function.** `audiocpp_request_set_text` is
+the only route to `text_input.language` and sets the option as a side effect,
+so the two arrive together or not at all — the exact pair this function exists
+to separate. The ABI is strictly less expressive than the engine it wraps, in a
+way the reference server demonstrates is load-bearing. Added to #65; the
+learned-refusal fallback from Run 4 stands as the only workaround available
+from this side.
+
+Upstream also caches the answer per model at registration
+(`refresh_model_option_flags`), which is the same shape as the
+`RefusesLanguage` cache here, reached from the other direction: upstream can
+ask the contract because it also has the separation, so it never needs to
+observe a refusal.

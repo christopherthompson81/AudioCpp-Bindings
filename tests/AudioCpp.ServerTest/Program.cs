@@ -160,6 +160,17 @@ else
     Console.WriteLine("no AUDIOCPP_ASR_MODEL/AUDIOCPP_ASR_AUDIO; skipping transcription");
 }
 
+if (asrModel is { Length: > 0 } && File.Exists(asrModel)
+    && asrAudio is { Length: > 0 } && File.Exists(asrAudio))
+{
+    Console.WriteLine();
+    failures += await AudioCpp.ServerTest.Management.RunAsync(
+        asrModel,
+        Environment.GetEnvironmentVariable("AUDIOCPP_ASR_FAMILY") ?? "",
+        Environment.GetEnvironmentVariable("AUDIOCPP_BACKEND") ?? "cpu",
+        asrAudio);
+}
+
 var alignModel = Environment.GetEnvironmentVariable("AUDIOCPP_ALIGN_MODEL");
 var alignAudio = Environment.GetEnvironmentVariable("AUDIOCPP_ALIGN_AUDIO");
 var alignText = Environment.GetEnvironmentVariable("AUDIOCPP_ALIGN_TEXT");

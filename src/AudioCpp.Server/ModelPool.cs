@@ -31,9 +31,58 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
         public AudioCppSession? Session { get; set; }
     }
 
-    public IReadOnlyList<ServerModel> Models => [.. config.Models];
+    // The configured models, which /v1/models/load can add to and change at
+    // runtime. A copy rather than config.Models because the config is a record
+    // and this list is not fixed once the server is up.
+    private readonly List<ServerModel> _specs = [.. config.Models];
+    private readonly Lock _specsLock = new();
 
-    public bool Knows(string id) => config.Models.Any(m => m.Id == id);
+    public IReadOnlyList<ServerModel> Models
+    {
+        get { lock (_specsLock) return [.. _specs]; }
+    }
+
+    public bool Knows(string id) => Spec(id) is not null;
+
+    /// <summary>Whether this server allows models to be added or removed.</summary>
+    public bool ManagementEnabled => config.UiManagement;
+
+    /// <summary>
+    /// Adds a model, or reconfigures one already registered under that id.
+    /// </summary>
+    /// <returns>
+    /// Whether an existing entry was changed. A repeat of the same
+    /// registration reports false and leaves a loaded model resident, which is
+    /// what makes load idempotent rather than a way to evict by accident.
+    /// </returns>
+    public async Task<bool> RegisterAsync(ServerModel spec, CancellationToken cancel = default)
+    {
+        ServerModel? previous;
+        lock (_specsLock)
+        {
+            previous = _specs.FirstOrDefault(m => m.Id == spec.Id);
+        }
+
+        if (previous is not null && previous == spec)
+        {
+            return false;
+        }
+
+        // Anything already resident under this id was loaded from the old
+        // configuration, so it has to go before the new one is recorded --
+        // otherwise the next request is served by the previous weights under
+        // the new description, which is the kind of mismatch that gets debugged
+        // as a model quality problem.
+        if (previous is not null) await UnloadAsync(spec.Id, cancel);
+
+        lock (_specsLock)
+        {
+            _specs.RemoveAll(m => m.Id == spec.Id);
+            _specs.Add(spec);
+        }
+        _refusesLanguage.TryRemove(spec.Id, out _);
+        return previous is not null;
+    }
 
     private readonly ConcurrentDictionary<string, bool> _refusesLanguage = new(StringComparer.Ordinal);
 
@@ -71,7 +120,71 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
     }
 
     /// <summary>How a model was configured, or null if no such id.</summary>
-    public ServerModel? Spec(string id) => config.Models.FirstOrDefault(m => m.Id == id);
+    public ServerModel? Spec(string id)
+    {
+        lock (_specsLock) return _specs.FirstOrDefault(m => m.Id == id);
+    }
+
+    /// <summary>Whether this model currently holds memory.</summary>
+    public bool IsLoaded(string id) =>
+        _entries.TryGetValue(id, out var entry) && entry.Session is not null;
+
+    /// <summary>
+    /// Releases a model's session and weights, waiting for any run in flight.
+    /// </summary>
+    /// <returns>Whether it was loaded; unloading an idle model is not an error.</returns>
+    /// <remarks>
+    /// Through the same gate a run takes, so an unload cannot land in the
+    /// middle of one. The entry stays registered: the id is still known and the
+    /// next request reloads it, which is what makes this a memory operation
+    /// rather than a configuration one.
+    /// </remarks>
+    public async Task<bool> UnloadAsync(string id, CancellationToken cancel = default)
+    {
+        if (!_entries.TryGetValue(id, out var entry)) return false;
+
+        await entry.Gate.WaitAsync(cancel);
+        try
+        {
+            if (entry.Session is null) return false;
+            entry.Session.Dispose();
+            entry.Session = null;
+            entry.Model?.Dispose();
+            entry.Model = null;
+            log($"unloaded {id}");
+            return true;
+        }
+        finally
+        {
+            entry.Gate.Release();
+        }
+    }
+
+    /// <summary>Unloads everything resident, and says what that was.</summary>
+    public async Task<IReadOnlyList<string>> UnloadAllAsync(CancellationToken cancel = default)
+    {
+        var unloaded = new List<string>();
+        foreach (var spec in Models)
+        {
+            if (await UnloadAsync(spec.Id, cancel)) unloaded.Add(spec.Id);
+        }
+        return unloaded;
+    }
+
+    /// <summary>Loads a model now rather than on its first request.</summary>
+    public Task LoadAsync(string id, CancellationToken cancel = default) =>
+        UseAsync(id, _ => 0, cancel);
+
+    /// <summary>Drops a model from the registry entirely, unloading it first.</summary>
+    public async Task<bool> ForgetAsync(string id, CancellationToken cancel = default)
+    {
+        if (Spec(id) is null) return false;
+        await UnloadAsync(id, cancel);
+        lock (_specsLock) _specs.RemoveAll(m => m.Id == id);
+        _entries.TryRemove(id, out _);
+        _refusesLanguage.TryRemove(id, out _);
+        return true;
+    }
 
     /// <summary>
     /// Voice names a client can put in a speech request, from every source
@@ -147,8 +260,7 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
     public async Task<T> UseAsync<T>(string id, Func<AudioCppSession, T> work,
                                      CancellationToken cancel = default)
     {
-        var spec = config.Models.FirstOrDefault(m => m.Id == id)
-                   ?? throw new KeyNotFoundException($"no model with id '{id}'");
+        var spec = Spec(id) ?? throw new KeyNotFoundException($"no model with id '{id}'");
         var entry = _entries.GetOrAdd(id, _ => new Entry(spec));
 
         await entry.Gate.WaitAsync(cancel);
@@ -157,6 +269,9 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
             if (entry.Session is null)
             {
                 var started = DateTime.UtcNow;
+                // spec, not entry.Spec: a reconfigured id keeps its entry (and
+                // its gate, which callers may be queued on) while the
+                // description it loads from changes underneath.
                 entry.Model ??= _registry.Load(spec.Path,
                     new ModelConfig(spec.Family.Length > 0 ? spec.Family : null));
                 entry.Session = entry.Model.CreateSession(
