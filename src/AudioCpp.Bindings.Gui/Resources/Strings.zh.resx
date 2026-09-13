@@ -71,11 +71,17 @@
   <data name="nav.studio" xml:space="preserve">
     <value>工作室</value>
   </data>
+  <data name="request.autoLanguage" xml:space="preserve">
+    <value>留空 = 自动</value>
+  </data>
   <data name="request.charactersPerChunk" xml:space="preserve">
     <value>每段字符数</value>
   </data>
   <data name="request.label" xml:space="preserve">
     <value>请求</value>
+  </data>
+  <data name="request.language" xml:space="preserve">
+    <value>语言</value>
   </data>
   <data name="request.sourceAudio" xml:space="preserve">
     <value>源音频</value>
@@ -91,6 +97,12 @@
   </data>
   <data name="request.title" xml:space="preserve">
     <value>输入与控制</value>
+  </data>
+  <data name="request.voiceDescription" xml:space="preserve">
+    <value>音色描述</value>
+  </data>
+  <data name="request.voiceDescriptionPlaceholder" xml:space="preserve">
+    <value>温暖、平静且语速适中的声音…</value>
   </data>
   <data name="result.label" xml:space="preserve">
     <value>结果</value>

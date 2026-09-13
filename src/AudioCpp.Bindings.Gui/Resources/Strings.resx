@@ -170,6 +170,18 @@
   <data name="request.sourceAudio" xml:space="preserve">
     <value>Source audio</value>
   </data>
+  <data name="request.language" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="request.autoLanguage" xml:space="preserve">
+    <value>blank = auto</value>
+  </data>
+  <data name="request.voiceDescription" xml:space="preserve">
+    <value>Voice description</value>
+  </data>
+  <data name="request.voiceDescriptionPlaceholder" xml:space="preserve">
+    <value>A warm, calm voice with measured pacing…</value>
+  </data>
   <data name="voice.reference" xml:space="preserve">
     <value>Reference voice</value>
   </data>

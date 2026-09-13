@@ -71,11 +71,17 @@
   <data name="nav.studio" xml:space="preserve">
     <value>Студия</value>
   </data>
+  <data name="request.autoLanguage" xml:space="preserve">
+    <value>пусто = автоматически</value>
+  </data>
   <data name="request.charactersPerChunk" xml:space="preserve">
     <value>Символов в части</value>
   </data>
   <data name="request.label" xml:space="preserve">
     <value>ЗАПРОС</value>
+  </data>
+  <data name="request.language" xml:space="preserve">
+    <value>Язык</value>
   </data>
   <data name="request.sourceAudio" xml:space="preserve">
     <value>Исходное аудио</value>
@@ -91,6 +97,12 @@
   </data>
   <data name="request.title" xml:space="preserve">
     <value>Ввод и управление</value>
+  </data>
+  <data name="request.voiceDescription" xml:space="preserve">
+    <value>Описание голоса</value>
+  </data>
+  <data name="request.voiceDescriptionPlaceholder" xml:space="preserve">
+    <value>Тёплый спокойный голос с размеренным темпом…</value>
   </data>
   <data name="result.label" xml:space="preserve">
     <value>РЕЗУЛЬТАТ</value>

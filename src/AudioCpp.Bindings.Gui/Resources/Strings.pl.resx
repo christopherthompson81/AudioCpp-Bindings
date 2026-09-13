@@ -71,11 +71,17 @@
   <data name="nav.studio" xml:space="preserve">
     <value>Studio</value>
   </data>
+  <data name="request.autoLanguage" xml:space="preserve">
+    <value>puste = automatycznie</value>
+  </data>
   <data name="request.charactersPerChunk" xml:space="preserve">
     <value>Znaki na fragment</value>
   </data>
   <data name="request.label" xml:space="preserve">
     <value>ŻĄDANIE</value>
+  </data>
+  <data name="request.language" xml:space="preserve">
+    <value>Język</value>
   </data>
   <data name="request.sourceAudio" xml:space="preserve">
     <value>Dźwięk źródłowy</value>
@@ -91,6 +97,12 @@
   </data>
   <data name="request.title" xml:space="preserve">
     <value>Dane wejściowe i ustawienia</value>
+  </data>
+  <data name="request.voiceDescription" xml:space="preserve">
+    <value>Opis głosu</value>
+  </data>
+  <data name="request.voiceDescriptionPlaceholder" xml:space="preserve">
+    <value>Ciepły, spokojny głos o umiarkowanym tempie…</value>
   </data>
   <data name="result.label" xml:space="preserve">
     <value>WYNIK</value>

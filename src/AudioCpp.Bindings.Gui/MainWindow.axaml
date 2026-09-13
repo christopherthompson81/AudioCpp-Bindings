@@ -403,6 +403,28 @@
               </StackPanel>
 
               <StackPanel Spacing="10" IsVisible="{Binding ShowText}">
+                <StackPanel IsVisible="{Binding ShowVoiceDescription}" Spacing="4">
+                  <TextBlock Text="{Binding [request.voiceDescription], Source={x:Static res:Loc.Current}}"
+                             Classes="Label" />
+                  <TextBox Text="{Binding VoiceDescription}" AcceptsReturn="True" Height="64"
+                           TextWrapping="Wrap"
+                           PlaceholderText="{Binding [request.voiceDescriptionPlaceholder], Source={x:Static res:Loc.Current}}" />
+                </StackPanel>
+
+                <!-- The model names its own languages, and families disagree on
+                     spelling: "en" for one, "english" for another. Blank sends
+                     none and lets the model decide. -->
+                <StackPanel IsVisible="{Binding ShowSpeechLanguage}" Spacing="4">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding [request.language], Source={x:Static res:Loc.Current}}"
+                               Classes="Label" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding [request.autoLanguage], Source={x:Static res:Loc.Current}}"
+                               Classes="Subtle" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <ComboBox ItemsSource="{Binding SpeechLanguages}"
+                            SelectedItem="{Binding SpeechLanguage}" MinWidth="180" />
+                </StackPanel>
+
                 <TextBlock Text="{Binding [request.text], Source={x:Static res:Loc.Current}}" Classes="Label" />
                 <TextBox Text="{Binding Text}" AcceptsReturn="True" Height="110"
                          TextWrapping="Wrap" PlaceholderText="{Binding [request.textPlaceholder], Source={x:Static res:Loc.Current}}" />
