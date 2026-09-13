@@ -372,7 +372,16 @@ internal static class LiveCheck
                         if (args.FirstOrDefault(a => a.StartsWith("packageTask="))?["packageTask=".Length..]
                             is { } packageTask)
                         {
-                            viewModel.CurrentWorkflow = packageTask;   // the catalogue is workflow-filtered
+                            // A workflow id, not an engine task: the catalogue is
+                            // workflow-filtered, and an unknown id would quietly
+                            // fall back to ASR and search the wrong list.
+                            if (!Workflow.All.Any(w => w.Id == packageTask))
+                            {
+                                Console.Error.WriteLine($"packageTask='{packageTask}' is not a "
+                                    + $"workflow; try {string.Join(", ", Workflow.All.Select(w => w.Id))}");
+                                failures++;
+                            }
+                            viewModel.CurrentWorkflow = packageTask;
                             await Task.Delay(200);
                         }
                         viewModel.SelectedEntry = viewModel.CatalogEntries
