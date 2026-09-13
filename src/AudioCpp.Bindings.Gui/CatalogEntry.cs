@@ -47,8 +47,13 @@ public sealed class CatalogEntry(FamilySpec family, PackageSpec package)
     /// </remarks>
     public string Key => $"{Family.Family}/{Package.Id}";
 
-    /// <summary>Whether this family can do the given task, for filtering the picker.</summary>
-    public bool SupportsTask(string task) => Family.Tasks.Contains(task);
+    /// <summary>Whether this family can do the given ABI task, for filtering the picker.</summary>
+    /// <remarks>
+    /// Through <see cref="SpecTasks"/>: a spec declares "music" where the ABI
+    /// takes "gen", so comparing the two directly matched nothing.
+    /// </remarks>
+    public bool SupportsTask(string task) =>
+        Family.Tasks.Any(declared => SpecTasks.Abi(declared) == task);
 
     public InstallState State
     {
