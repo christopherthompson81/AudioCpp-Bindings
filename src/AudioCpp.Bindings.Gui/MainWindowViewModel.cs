@@ -892,7 +892,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             IsLoaded = false;
             ModelSummary = "";
             Options.Clear();
-            Status = Describe(exception);
+            Fail(exception, "load");
         }
         finally
         {
@@ -1106,7 +1106,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
         catch (Exception exception)
         {
-            Status = Describe(exception);
+            Fail(exception, "run");
         }
         finally
         {
@@ -1863,6 +1863,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// A failed ABI call carries the native detail, which is far more useful than
     /// the managed exception type alone.
     /// </summary>
+    /// <summary>
+    /// Report a failure to the status line and the log.
+    /// </summary>
+    /// <remarks>
+    /// A failure is the case the log exists for: the status line keeps only the
+    /// last thing that happened, so a load that failed before a later success
+    /// would otherwise vanish entirely.
+    /// </remarks>
+    private void Fail(Exception exception, string kind)
+    {
+        var message = Describe(exception);
+        Status = message;
+        Log(kind, message);
+    }
+
     private static string Describe(Exception exception) => exception switch
     {
         AudioCppException native => $"{native.Operation} failed: {native.Detail} [{native.Status}]",
