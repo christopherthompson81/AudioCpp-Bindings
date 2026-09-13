@@ -58,6 +58,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     // the one constant the pump and the device both use.
     private int _resultSampleRate = LiveTranscription.SampleRate;
     private string _timingBreakdown = "";
+    private string _page = "Studio";
     private string _playStatus = "";
     private string _task = "asr";
     private string _audioPath = "";
@@ -301,6 +302,26 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public ObservableCollection<DeclaredOption> RequestOptions { get; } = [];
 
     public ObservableCollection<DeclaredOption> SessionOptions { get; } = [];
+
+    /// <summary>Two configurations compared on one input.</summary>
+    public Arena Arena { get; } = new();
+
+    public IReadOnlyList<string> Pages { get; } = ["Studio", "Arena"];
+
+    /// <summary>Which page the window shows.</summary>
+    public string Page
+    {
+        get => _page;
+        set
+        {
+            if (!Set(ref _page, value)) return;
+            Notify(nameof(IsStudio));
+            Notify(nameof(IsArena));
+        }
+    }
+
+    public bool IsStudio => _page == "Studio";
+    public bool IsArena => _page == "Arena";
 
     /// <summary>Audio streams a run produced, each separately playable and saveable.</summary>
     public ObservableCollection<NamedAudioEntry> OutputStreams { get; } = [];
@@ -1345,6 +1366,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public async Task StopAudioAsync()
     {
         ResetPlayer();
+        Arena.Dispose();
         await StopRecordingAsync();
     }
 

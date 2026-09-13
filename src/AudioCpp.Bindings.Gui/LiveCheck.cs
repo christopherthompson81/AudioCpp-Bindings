@@ -242,6 +242,42 @@ internal static class LiveCheck
                     return;
                 }
 
+                if (args.Contains("--arena-check"))
+                {
+                    var arena = viewModel.Arena;
+                    arena.Left.ModelPath = viewModel.ModelPath;
+                    arena.Left.FamilyHint = viewModel.FamilyHint;
+                    arena.Left.Backend = "cuda";
+                    arena.Right.ModelPath = viewModel.ModelPath;
+                    arena.Right.FamilyHint = viewModel.FamilyHint;
+                    arena.Right.Backend = "cpu";          // same weights, different backend
+                    arena.AudioPath = viewModel.AudioPath;
+                    arena.Task = "asr";
+
+                    await arena.LoadLeftCommand.ExecuteAsync();
+                    await arena.LoadRightCommand.ExecuteAsync();
+                    Console.WriteLine($"A: {arena.Left.Status}");
+                    Console.WriteLine($"B: {arena.Right.Status}");
+
+                    await arena.CompareCommand.ExecuteAsync();
+                    Console.WriteLine($"A timing: {arena.Left.Timing}  ({arena.Left.WordCount} words)");
+                    Console.WriteLine($"B timing: {arena.Right.Timing}  ({arena.Right.WordCount} words)");
+                    Console.WriteLine($"summary: {arena.Summary}");
+                    Console.WriteLine($"diff pieces: {arena.Diff.Count}");
+
+                    var onlyA = arena.Diff.Count(d => d.Side == "A only");
+                    var onlyB = arena.Diff.Count(d => d.Side == "B only");
+                    Console.WriteLine($"disagreements: A only {onlyA}, B only {onlyB}");
+
+                    if (arena.Diff.Count == 0) { Console.Error.WriteLine("no diff produced"); failures++; }
+                    if (arena.Left.WordCount == 0 || arena.Right.WordCount == 0)
+                    { Console.Error.WriteLine("a side produced nothing"); failures++; }
+
+                    Console.WriteLine(failures == 0 ? "arena OK" : $"arena: {failures} failure(s)");
+                    Environment.Exit(failures == 0 ? 0 : 1);
+                    return;
+                }
+
                 if (args.Contains("--lifecycle-check"))
                 {
                     failures += await LifecycleCheckAsync(viewModel);
