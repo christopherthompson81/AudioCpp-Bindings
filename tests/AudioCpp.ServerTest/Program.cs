@@ -76,6 +76,57 @@ await using (var third = new AudioCppServer())
     await third.StopAsync();
 }
 
+// The voices route never loads a model -- it reads config and two directories
+// -- so every source it draws from can be checked without one. Worth doing
+// here rather than beside the model tests: this is where a mistake in the
+// merging shows up, and it costs nothing to run.
+{
+    var root = Directory.CreateTempSubdirectory("audiocpp-voices");
+    try
+    {
+        var embeddings = Directory.CreateDirectory(Path.Combine(root.FullName, "model", "embeddings"));
+        await File.WriteAllTextAsync(Path.Combine(embeddings.FullName, "cosette.safetensors"), "x");
+        await File.WriteAllTextAsync(Path.Combine(embeddings.FullName, "marius.safetensors"), "x");
+        // Not an embedding, and must not be listed as one.
+        await File.WriteAllTextAsync(Path.Combine(embeddings.FullName, "notes.txt"), "x");
+
+        var library = Directory.CreateDirectory(Path.Combine(root.FullName, "voices"));
+        await File.WriteAllTextAsync(Path.Combine(library.FullName, "alba.wav"), "x");
+        // The same name from two sources, which must appear once.
+        await File.WriteAllTextAsync(Path.Combine(library.FullName, "cosette.wav"), "x");
+
+        var voiceConfig = new ServerConfig
+        {
+            Port = 19900 + Random.Shared.Next(90),
+            VoiceDir = library.FullName,
+            Models = [new ServerModel("tts", "", Path.Combine(root.FullName, "model"), "tts",
+                                      "offline", ["preset_one"])],
+        };
+        await using var voiceServer = new AudioCppServer();
+        await voiceServer.StartAsync(voiceConfig);
+        using var voiceClient = new HttpClient { BaseAddress = new Uri(voiceServer.Address) };
+
+        var listed = await voiceClient.GetStringAsync("/v1/audio/voices?model=tts");
+        Check("voices merges presets, embeddings and the voice library",
+            listed == """{"voices":["alba","cosette","marius","preset_one"]}""", listed);
+
+        // One model configured, so an omitted id resolves to it rather than
+        // answering empty.
+        var implied = await voiceClient.GetStringAsync("/v1/audio/voices");
+        Check("one configured model means the id can be omitted", implied == listed, implied);
+
+        var none = await voiceClient.GetStringAsync("/v1/audio/voices?model=nope");
+        Check("an unknown id still lists the voice library",
+            none == """{"voices":["alba","cosette"]}""", none);
+
+        await voiceServer.StopAsync();
+    }
+    finally
+    {
+        root.Delete(recursive: true);
+    }
+}
+
 // The routes that need a model run only when one is given: the suite stays
 // model-free by default, as the rest of it is.
 var speechModel = Environment.GetEnvironmentVariable("AUDIOCPP_TTS_MODEL");
@@ -107,6 +158,27 @@ if (asrModel is { Length: > 0 } && asrAudio is { Length: > 0 } && File.Exists(as
 else
 {
     Console.WriteLine("no AUDIOCPP_ASR_MODEL/AUDIOCPP_ASR_AUDIO; skipping transcription");
+}
+
+var alignModel = Environment.GetEnvironmentVariable("AUDIOCPP_ALIGN_MODEL");
+var alignAudio = Environment.GetEnvironmentVariable("AUDIOCPP_ALIGN_AUDIO");
+var alignText = Environment.GetEnvironmentVariable("AUDIOCPP_ALIGN_TEXT");
+if (alignModel is { Length: > 0 } && File.Exists(alignModel)
+    && alignAudio is { Length: > 0 } && File.Exists(alignAudio)
+    && alignText is { Length: > 0 })
+{
+    Console.WriteLine();
+    failures += await AudioCpp.ServerTest.Alignment.RunAsync(
+        alignModel,
+        Environment.GetEnvironmentVariable("AUDIOCPP_ALIGN_FAMILY") ?? "",
+        Environment.GetEnvironmentVariable("AUDIOCPP_BACKEND") ?? "cpu",
+        alignAudio,
+        alignText);
+}
+else
+{
+    Console.WriteLine("no AUDIOCPP_ALIGN_MODEL/AUDIOCPP_ALIGN_AUDIO/AUDIOCPP_ALIGN_TEXT; "
+                      + "skipping alignment");
 }
 
 Console.WriteLine(failures == 0 ? "server OK" : $"server: {failures} failure(s)");
