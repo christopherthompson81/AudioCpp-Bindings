@@ -425,6 +425,64 @@ internal static class LiveCheck
                     return;
                 }
 
+                // Type-ahead over the package list. The control supplies the
+                // strings; what is worth checking is the matching -- and in
+                // relationships rather than counts, because a count is a fact
+                // about today's catalogue and would need editing every time
+                // upstream adds a package.
+                if (args.Contains("--picker-check"))
+                {
+                    viewModel.Task = "asr";
+                    await Task.Delay(150);
+                    var all = viewModel.CatalogEntries.ToList();
+
+                    List<string> Hits(string search) => all
+                        .Where(e => MainWindowViewModel.Matches(e, search))
+                        .Select(e => e.Title).ToList();
+
+                    void Expect(string what, bool ok)
+                    {
+                        Console.WriteLine($"  {(ok ? "ok  " : "FAIL")}  {what}");
+                        if (!ok) failures++;
+                    }
+
+                    var empty = Hits("");
+                    var name = Hits("parakeet");
+                    var precision = Hits("q8");
+                    var both = Hits("parakeet q8");
+                    var reversed = Hits("q8 parakeet");
+                    var shouted = Hits("PARAKEET");
+                    var subtitle = Hits("gguf");
+
+                    Console.WriteLine($"{all.Count} asr packages; "
+                                      + $"'parakeet' {name.Count}, 'q8' {precision.Count}, "
+                                      + $"'parakeet q8' {both.Count}, 'gguf' {subtitle.Count}");
+                    Console.WriteLine($"  'parakeet q8' -> {string.Join(", ", both)}");
+
+                    Expect("an empty search leaves everything", empty.Count == all.Count);
+                    Expect("a name narrows it", name.Count > 0 && name.Count < all.Count);
+                    Expect("word order does not matter", both.SequenceEqual(reversed));
+                    Expect("case does not matter", shouted.SequenceEqual(name));
+                    Expect("every word must match", both.Count <= name.Count
+                                                    && both.All(name.Contains));
+                    Expect("the subtitle is searched too", subtitle.Count > 0);
+                    Expect("nonsense matches nothing", Hits("zzzz").Count == 0);
+
+                    // The picker is already filtered by task; searching must not
+                    // reach past that filter.
+                    viewModel.Task = "tts";
+                    await Task.Delay(150);
+                    var acrossTask = viewModel.CatalogEntries
+                        .Count(e => MainWindowViewModel.Matches(e, "parakeet"));
+                    Console.WriteLine($"  'parakeet' under tts: {acrossTask} "
+                                      + $"of {viewModel.CatalogEntries.Count}");
+                    Expect("search stays inside the task filter", acrossTask == 0);
+
+                    Console.WriteLine(failures == 0 ? "picker OK" : $"picker: {failures} failure(s)");
+                    Environment.Exit(failures == 0 ? 0 : 1);
+                    return;
+                }
+
                 if (args.Contains("--strings-check"))
                 {
                     // One key from each area, plus one of ours that upstream
