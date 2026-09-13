@@ -1,0 +1,69 @@
+<!--
+  Palettes lifted from the audio.cpp web UI's shipped CSS so the two surfaces
+  look like the same product. Both variants are defined here rather than only
+  the dark one, so switching theme is a variant change and not a restyle.
+
+  Names follow the CSS custom properties they came from.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ResourceDictionary.ThemeDictionaries>
+
+    <ResourceDictionary x:Key="Dark">
+      <Color x:Key="AppBgColor">#07101f</Color>
+      <SolidColorBrush x:Key="AppBg" Color="#07101f" />
+      <SolidColorBrush x:Key="AppPanel" Color="#0d192b" />
+      <SolidColorBrush x:Key="AppCard" Color="#081426" />
+      <SolidColorBrush x:Key="AppChip" Color="#071426" />
+      <SolidColorBrush x:Key="AppControl" Color="#081426" />
+      <SolidColorBrush x:Key="AppControlBorder" Color="#2a405f" />
+      <SolidColorBrush x:Key="AppLine" Color="#233652" />
+      <SolidColorBrush x:Key="AppText" Color="#dce8fa" />
+      <SolidColorBrush x:Key="AppTextStrong" Color="#f4f8ff" />
+      <SolidColorBrush x:Key="AppTextLabel" Color="#b8cae4" />
+      <SolidColorBrush x:Key="AppTextSubtle" Color="#9fbbdc" />
+      <SolidColorBrush x:Key="AppMuted" Color="#8ca3c3" />
+      <SolidColorBrush x:Key="AppAccent" Color="#42e8d5" />
+      <SolidColorBrush x:Key="AppBlue" Color="#6aa8ff" />
+      <SolidColorBrush x:Key="AppDanger" Color="#ff778b" />
+      <SolidColorBrush x:Key="AppButton" Color="#14243b" />
+      <SolidColorBrush x:Key="AppButtonHover" Color="#1a304e" />
+      <SolidColorBrush x:Key="AppButtonHoverBorder" Color="#4f719d" />
+      <SolidColorBrush x:Key="AppIconBg" Color="#122b45" />
+      <SolidColorBrush x:Key="AppActiveBg" Color="#0d2934" />
+      <SolidColorBrush x:Key="AppActiveBorder" Color="#347d8f" />
+      <SolidColorBrush x:Key="AppCode" Color="#071220" />
+      <SolidColorBrush x:Key="AppDisabled" Color="#45566f" />
+      <SolidColorBrush x:Key="AppTextInvert" Color="#041619" />
+    </ResourceDictionary>
+
+    <ResourceDictionary x:Key="Light">
+      <Color x:Key="AppBgColor">#f6f8fb</Color>
+      <SolidColorBrush x:Key="AppBg" Color="#f6f8fb" />
+      <SolidColorBrush x:Key="AppPanel" Color="#ffffff" />
+      <SolidColorBrush x:Key="AppCard" Color="#ffffff" />
+      <SolidColorBrush x:Key="AppChip" Color="#edf3fa" />
+      <SolidColorBrush x:Key="AppControl" Color="#ffffff" />
+      <SolidColorBrush x:Key="AppControlBorder" Color="#b8c7da" />
+      <SolidColorBrush x:Key="AppLine" Color="#cbd7e6" />
+      <SolidColorBrush x:Key="AppText" Color="#182335" />
+      <SolidColorBrush x:Key="AppTextStrong" Color="#0b1220" />
+      <SolidColorBrush x:Key="AppTextLabel" Color="#31435c" />
+      <SolidColorBrush x:Key="AppTextSubtle" Color="#50657e" />
+      <SolidColorBrush x:Key="AppMuted" Color="#5e7189" />
+      <SolidColorBrush x:Key="AppAccent" Color="#087f7a" />
+      <SolidColorBrush x:Key="AppBlue" Color="#256fc9" />
+      <SolidColorBrush x:Key="AppDanger" Color="#c43853" />
+      <SolidColorBrush x:Key="AppButton" Color="#edf3fa" />
+      <SolidColorBrush x:Key="AppButtonHover" Color="#dfeaf6" />
+      <SolidColorBrush x:Key="AppButtonHoverBorder" Color="#94abc5" />
+      <SolidColorBrush x:Key="AppIconBg" Color="#e4f1f6" />
+      <SolidColorBrush x:Key="AppActiveBg" Color="#e6f7f5" />
+      <SolidColorBrush x:Key="AppActiveBorder" Color="#11857f" />
+      <SolidColorBrush x:Key="AppCode" Color="#f0f5fa" />
+      <SolidColorBrush x:Key="AppDisabled" Color="#9aaabc" />
+      <SolidColorBrush x:Key="AppTextInvert" Color="#ffffff" />
+    </ResourceDictionary>
+
+  </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

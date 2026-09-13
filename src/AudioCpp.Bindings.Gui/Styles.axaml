@@ -1,0 +1,166 @@
+<!--
+  Control styling to match the web UI. Classes carry the intent (Card, Eyebrow,
+  Chip, Primary) so the layout reads as structure rather than a pile of literal
+  colours, and so a token change lands everywhere at once.
+-->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <Style Selector="Window">
+    <Setter Property="Background" Value="{DynamicResource AppBg}" />
+    <Setter Property="FontFamily" Value="{StaticResource InterFont}" />
+  </Style>
+
+  <Style Selector="TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+  </Style>
+
+  <!-- Small-caps section marker above a card's title, e.g. REQUEST / RESULT. -->
+  <Style Selector="TextBlock.Eyebrow">
+    <Setter Property="Foreground" Value="{DynamicResource AppTextSubtle}" />
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="1.2" />
+    <Setter Property="Text" Value="" />
+  </Style>
+
+  <Style Selector="TextBlock.Title">
+    <Setter Property="Foreground" Value="{DynamicResource AppTextStrong}" />
+    <Setter Property="FontSize" Value="17" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="TextBlock.Hero">
+    <Setter Property="Foreground" Value="{DynamicResource AppTextStrong}" />
+    <Setter Property="FontSize" Value="34" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+
+  <Style Selector="TextBlock.Label">
+    <Setter Property="Foreground" Value="{DynamicResource AppTextLabel}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="TextBlock.Subtle">
+    <Setter Property="Foreground" Value="{DynamicResource AppMuted}" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+
+  <Style Selector="Border.Card">
+    <Setter Property="Background" Value="{DynamicResource AppCard}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppLine}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="16" />
+  </Style>
+
+  <Style Selector="Border.Bar">
+    <Setter Property="Background" Value="{DynamicResource AppPanel}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppLine}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+
+  <!-- Task selector across the top. Every chip is bordered; the selected one
+       takes the accent border the web UI gives its active chip. -->
+  <Style Selector="ListBox.Chips > ListBoxItem">
+    <Setter Property="Background" Value="{DynamicResource AppChip}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppLine}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="14,9" />
+    <Setter Property="Margin" Value="0,0,8,8" />
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+  </Style>
+  <Style Selector="ListBox.Chips > ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AppActiveBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppActiveBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource AppTextStrong}" />
+  </Style>
+  <Style Selector="ListBox.Chips > ListBoxItem:pointerover /template/ ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource AppButtonHoverBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+  </Style>
+
+  <Style Selector="Button">
+    <Setter Property="Background" Value="{DynamicResource AppButton}" />
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppControlBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Padding" Value="12,7" />
+  </Style>
+  <Style Selector="Button:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AppButtonHover}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppButtonHoverBorder}" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource AppText}" />
+  </Style>
+
+  <Style Selector="Button.Primary">
+    <Setter Property="Background" Value="{DynamicResource AppAccent}" />
+    <Setter Property="Foreground" Value="{DynamicResource AppTextInvert}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppAccent}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Padding" Value="18,8" />
+  </Style>
+  <Style Selector="Button.Primary:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AppAccent}" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource AppTextInvert}" />
+  </Style>
+
+  <Style Selector="TextBox">
+    <Setter Property="Background" Value="{DynamicResource AppControl}" />
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppControlBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Padding" Value="10,7" />
+  </Style>
+  <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+    <Setter Property="BorderBrush" Value="{DynamicResource AppActiveBorder}" />
+  </Style>
+
+  <Style Selector="ComboBox">
+    <Setter Property="Background" Value="{DynamicResource AppControl}" />
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppControlBorder}" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Padding" Value="10,6" />
+  </Style>
+
+  <Style Selector="NumericUpDown">
+    <Setter Property="Background" Value="{DynamicResource AppControl}" />
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppControlBorder}" />
+    <Setter Property="CornerRadius" Value="7" />
+  </Style>
+
+  <Style Selector="CheckBox">
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+  </Style>
+
+  <Style Selector="DataGrid">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="GridLinesVisibility" Value="Horizontal" />
+    <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource AppLine}" />
+  </Style>
+
+  <Style Selector="TabControl">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="TabItem">
+    <Setter Property="Foreground" Value="{DynamicResource AppMuted}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="MinHeight" Value="0" />
+  </Style>
+  <Style Selector="TabItem:selected">
+    <Setter Property="Foreground" Value="{DynamicResource AppTextStrong}" />
+  </Style>
+
+</Styles>

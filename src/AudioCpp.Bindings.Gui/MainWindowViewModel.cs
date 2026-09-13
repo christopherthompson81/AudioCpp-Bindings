@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Text;
 using System.Runtime.CompilerServices;
 using AudioCpp.Native;
 
@@ -28,6 +29,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private bool _useBuiltInChunking = true;
     private double _chunkSeconds = 10;
     private string _vadAssetPath = "";
+    private string _resultJson = "";
+    private CancellationTokenSource? _cancel;
     private string _task = "asr";
     private string _audioPath = "";
     private string _text = "The quick brown fox jumps over the lazy dog.";
@@ -51,11 +54,25 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         LoadCommand = new RelayCommand(LoadAsync, () => !_busy && ModelPath.Length > 0);
         RunCommand = new RelayCommand(RunAsync, () => !_busy && _isLoaded);
         SaveWavCommand = new RelayCommand(SaveWavAsync, () => !_busy && _outputSamples is { Length: > 0 });
+        CancelCommand = new RelayCommand(CancelAsync, () => _busy && _cancel is not null);
+
+        // Present before any model is loaded, as the web UI's are. Counts fill in
+        // on load; an empty row would read as a broken layout rather than an
+        // unloaded one.
+        foreach (var task in Tasks) TaskChips.Add(new TaskChip(task, TitleFor(task), 0));
     }
 
     public RelayCommand LoadCommand { get; }
     public RelayCommand RunCommand { get; }
     public RelayCommand SaveWavCommand { get; }
+
+    /// <summary>
+    /// Stops a run between segments. A single audiocpp_session_run() cannot be
+    /// interrupted -- the call is synchronous and the ABI offers no abort -- so
+    /// this takes effect only where a run is a loop: VAD-segmented ASR, and
+    /// long-text synthesis. Disabled when there is nothing loop-shaped to stop.
+    /// </summary>
+    public RelayCommand CancelCommand { get; }
 
     /// <summary>Set by the view so file pickers can be opened from here.</summary>
     public Func<string, bool, Task<string?>>? PickPath { get; set; }
@@ -65,6 +82,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<string> Backends { get; } = ["cpu", "cuda", "hip", "vulkan", "metal", "best"];
     public IReadOnlyList<string> Tasks { get; } = ["asr", "tts", "vad", "diar", "sep", "align"];
+
+    /// <summary>
+    /// The task selector along the top. Count is how many of the loaded model's
+    /// tasks match -- 0 or 1 here, since this app holds one model, where the web
+    /// UI counts across a whole catalog. Same shape, honest number.
+    /// </summary>
+    public ObservableCollection<TaskChip> TaskChips { get; } = [];
+
+    public TaskChip? SelectedChip
+    {
+        get => TaskChips.FirstOrDefault(c => c.Task == _task);
+        set { if (value is not null) Task = value.Task; }
+    }
 
     /// <summary>Whatever the loaded family declares, read at runtime rather than hardcoded.</summary>
     public ObservableCollection<DeclaredOption> Options { get; } = [];
@@ -77,7 +107,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public string FamilyHint { get => _familyHint; set => Set(ref _familyHint, value); }
-    public string Backend { get => _backend; set => Set(ref _backend, value); }
+    public string Backend
+    {
+        get => _backend;
+        set { if (Set(ref _backend, value)) Notify(nameof(BackendBadge)); }
+    }
     public int Threads { get => _threads; set => Set(ref _threads, value); }
 
     /// <summary>Let the engine segment on speech rather than handing it the whole clip.</summary>
@@ -100,7 +134,103 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     /// <summary>Directory holding silero_vad_16k.safetensors; blank means go looking.</summary>
     public string VadAssetPath { get => _vadAssetPath; set => Set(ref _vadAssetPath, value); }
-    public string Task { get => _task; set => Set(ref _task, value); }
+    public string Task
+    {
+        get => _task;
+        set
+        {
+            if (!Set(ref _task, value)) return;
+            Notify(nameof(SelectedChip));
+            Notify(nameof(TaskTitle));
+            Notify(nameof(TaskBlurb));
+            Notify(nameof(TaskBadge));
+        }
+    }
+
+    private static string TitleFor(string task) => task switch
+    {
+        "asr" => "ASR / Transcription",
+        "tts" => "Text to speech",
+        "vad" => "Voice activity",
+        "diar" => "Diarisation",
+        "sep" => "Source separation",
+        "align" => "Forced alignment",
+        _ => task,
+    };
+
+    /// <summary>
+    /// The structured result as JSON, which the web UI shows beside the plain
+    /// transcript. Hand-built rather than serialised: the rows are already flat
+    /// strings, and a serialiser would pull in a dependency for one string.
+    /// </summary>
+    private string BuildResultJson(List<ResultRow> rows, string transcript)
+    {
+        var text = new StringBuilder();
+        text.Append("{\n  \"text\": ").Append(Quote(transcript)).Append(",\n");
+        text.Append("  \"seconds\": ").Append(_lastRunSeconds.ToString("F3",
+            System.Globalization.CultureInfo.InvariantCulture)).Append(",\n");
+        text.Append("  \"rows\": [\n");
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            text.Append("    {\"kind\": ").Append(Quote(row.Kind))
+                .Append(", \"span\": ").Append(Quote(row.Span))
+                .Append(", \"value\": ").Append(Quote(row.Value))
+                .Append(", \"detail\": ").Append(Quote(row.Detail)).Append('}');
+            if (i < rows.Count - 1) text.Append(',');
+            text.Append('\n');
+        }
+        text.Append("  ]\n}");
+        return text.ToString();
+
+        static string Quote(string value)
+        {
+            var escaped = value.Replace("\\", "\\\\").Replace("\"", "\\\"")
+                               .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+            return $"\"{escaped}\"";
+        }
+    }
+
+    /// <summary>Headline for the current task, as the web UI's hero block shows it.</summary>
+    public string TaskTitle => _task switch
+    {
+        "asr" => "Transcription",
+        "tts" => "Text to speech",
+        "vad" => "Voice activity",
+        "diar" => "Diarisation",
+        "sep" => "Source separation",
+        "align" => "Forced alignment",
+        _ => _task,
+    };
+
+    public string TaskBlurb => _task switch
+    {
+        "asr" => "Transcribe spoken audio into text, with language and timestamp controls when supported.",
+        "tts" => "Generate speech from text, with voice presets and cloning when supported.",
+        "vad" => "Find the stretches of a recording that contain speech.",
+        "diar" => "Attribute speech to speakers across a recording.",
+        "sep" => "Split a mixture into its constituent sources.",
+        "align" => "Align a known transcript to the audio it was spoken in.",
+        _ => "",
+    };
+
+    public string TaskBadge => _task.ToUpperInvariant();
+
+    /// <summary>Backend in the top-right pill, which reads CUDA once a session is live.</summary>
+    public string BackendBadge => _backend.ToUpperInvariant();
+
+    public string LoadedModelName => _model?.Family ?? "No model loaded";
+
+    /// <summary>RESIDENT once weights are in memory, matching the web UI's wording.</summary>
+    public string LoadedModelState => _model is null ? "NONE" : _session is null ? "AVAILABLE" : "RESIDENT";
+
+    /// <summary>Run status shown after the buttons: Ready, Running…, or a completion time.</summary>
+    public string RunState => _busy ? "Running…"
+        : _lastRunSeconds > 0 ? $"Complete in {_lastRunSeconds:F2}s."
+        : "Ready";
+
+    /// <summary>The structured result, which the web UI shows beside the transcript.</summary>
+    public string ResultJson { get => _resultJson; private set => Set(ref _resultJson, value); }
     public string AudioPath { get => _audioPath; set => Set(ref _audioPath, value); }
 
     /// <summary>
@@ -139,6 +269,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set
         {
             if (!Set(ref _busy, value)) return;
+            Notify(nameof(RunState));
+            CancelCommand.RaiseCanExecuteChanged();
             LoadCommand.RaiseCanExecuteChanged();
             RunCommand.RaiseCanExecuteChanged();
             SaveWavCommand.RaiseCanExecuteChanged();
@@ -239,7 +371,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 }
             }
 
+            for (var i = 0; i < TaskChips.Count; i++)
+            {
+                var chip = TaskChips[i];
+                TaskChips[i] = chip with { Count = supported.Contains(chip.Task) ? 1 : 0 };
+            }
+
             if (supported.Count > 0 && !supported.Contains(Task)) Task = supported[0];
+            Notify(nameof(SelectedChip));
+            Notify(nameof(LoadedModelName));
+            Notify(nameof(LoadedModelState));
             IsLoaded = true;
             Status = $"Loaded {model.Family} — {Options.Count} declared option(s), read from the model."
                    + (_vadModel is not null ? $"  VAD: {_vadModel.Family}." : "");
@@ -265,6 +406,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Rows.Clear();
         Transcript = "";
         _outputSamples = null;
+        _cancel = new CancellationTokenSource();
+        CancelCommand.RaiseCanExecuteChanged();
         try
         {
             var started = DateTime.UtcNow;
@@ -383,6 +526,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             });
 
             _lastRunSeconds = (DateTime.UtcNow - started).TotalSeconds;
+            Notify(nameof(RunState));
+            ResultJson = BuildResultJson(rows, transcript);
             Transcript = transcript;
             foreach (var row in rows) Rows.Add(row);
             Notify(nameof(OutputSamples));
@@ -445,8 +590,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         var pieces = new List<string>();
+        var cancelled = false;
         foreach (var (start, end) in groups)
         {
+            if (_cancel?.IsCancellationRequested == true) { cancelled = true; break; }
+
             var window = new float[end - start];
             Array.Copy(clip.Samples, (int)start, window, 0, window.Length);
 
@@ -472,7 +620,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         var speech = groups.Sum(g => (g.End - g.Start)) / (double)rate;
         _segmentedSummary = $"{groups.Count} group(s) from {segments.Count} VAD segment(s), "
-                          + $"{speech:F1}s of speech.";
+                          + $"{speech:F1}s of speech."
+                          + (cancelled ? "  Cancelled part-way." : "");
         return string.Join(" ", pieces);
     }
 
@@ -503,6 +652,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
         Add(gs, ge);
         return groups;
+    }
+
+    private Task CancelAsync()
+    {
+        _cancel?.Cancel();
+        Status = "Cancelling after the current segment…";
+        return System.Threading.Tasks.Task.CompletedTask;
     }
 
     private async Task SaveWavAsync()
@@ -721,3 +877,7 @@ public sealed class DeclaredOption(
 }
 
 public readonly record struct ResultRow(string Kind, string Span, string Value, string Detail);
+
+/// <summary>One entry in the task selector: a display title and how many of the
+/// loaded model's tasks it covers.</summary>
+public sealed record TaskChip(string Task, string Title, int Count);
