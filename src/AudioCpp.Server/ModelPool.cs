@@ -36,6 +36,16 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
     public bool Knows(string id) => config.Models.Any(m => m.Id == id);
 
     /// <summary>
+    /// Run something with the model itself as well as its session, for a route
+    /// that has to ask the model about its own contract.
+    /// </summary>
+    public Task<T> UseModelAsync<T>(string id, Func<AudioCppModel, AudioCppSession, T> work,
+                                    CancellationToken cancel = default) =>
+        UseAsync(id, session => work(_loaded[id], session), cancel);
+
+    private readonly Dictionary<string, AudioCppModel> _loaded = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Run something against a model's session, with the model loaded if it is
     /// not already and nothing else using it.
     /// </summary>
@@ -57,6 +67,7 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
                 entry.Session = entry.Model.CreateSession(
                     spec.Task, spec.Mode,
                     new BackendConfig(config.Backend, config.Device, config.Threads));
+                _loaded[id] = entry.Model;
                 log($"loaded {id} ({entry.Model.Family}) in "
                     + $"{(DateTime.UtcNow - started).TotalMilliseconds:F0} ms");
             }
