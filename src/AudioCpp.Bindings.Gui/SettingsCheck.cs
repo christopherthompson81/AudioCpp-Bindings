@@ -91,7 +91,16 @@ internal static class SettingsCheck
                 if (!ok) failures++;
             }
 
-            // 4. Reading settings must not itself write settings: applying a
+            // 4. A burst of changes must leave the last one on disk, and must
+            //    not trip over its own debounce: each change disposes the
+            //    source the previous one is waiting on.
+            for (var i = 0; i < 2000; i++) first.ChunkBudget = 1000 + i;
+            Thread.Sleep(1200);
+            var burst = new MainWindowViewModel(new SettingsStore(directory));
+            Console.WriteLine($"after 2000 rapid changes: chunk budget={burst.ChunkBudget} (want 2999)");
+            if (burst.ChunkBudget != 2999) { Console.Error.WriteLine("the last change was lost"); failures++; }
+
+            // 5. Reading settings must not itself write settings: applying a
             //    saved value raises PropertyChanged like any other assignment,
             //    and a save from inside the load would race the file it read.
             var stamp = File.GetLastWriteTimeUtc(store.StorePath);
@@ -101,7 +110,7 @@ internal static class SettingsCheck
                 Console.Error.WriteLine("loading settings wrote the file back"); failures++;
             }
 
-            // 5. A corrupt file falls back to defaults, says so, and does not throw.
+            // 6. A corrupt file falls back to defaults, says so, and does not throw.
             File.WriteAllText(store.StorePath, "{ this is not json");
             var broken = new SettingsStore(directory);
             var recovered = broken.Load();
@@ -114,7 +123,7 @@ internal static class SettingsCheck
             Console.WriteLine($"  after corruption: theme={third.Theme} (a default)");
             if (third.Theme != "System") { Console.Error.WriteLine("did not fall back"); failures++; }
 
-            // 6. A file from a build that knew fewer settings leaves the rest alone.
+            // 7. A file from a build that knew fewer settings leaves the rest alone.
             File.WriteAllText(store.StorePath, "{\"Theme\":\"Light\"}");
             var partial = new MainWindowViewModel(new SettingsStore(directory));
             Console.WriteLine($"  partial file: theme={partial.Theme} task={partial.Task} "

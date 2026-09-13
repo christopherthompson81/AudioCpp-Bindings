@@ -255,7 +255,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _ = System.Threading.Tasks.Task.Run(async () =>
         {
             try { await System.Threading.Tasks.Task.Delay(400, debounce.Token); }
-            catch (OperationCanceledException) { return; }
+            // Disposed as well as cancelled: the next change disposes this
+            // source, and it can be gone before the delay notices it was
+            // cancelled. Both mean the same thing -- a newer snapshot is on
+            // its way, so drop this one.
+            catch (Exception exception) when (exception is OperationCanceledException
+                                              or ObjectDisposedException) { return; }
             _settings.Save(snapshot);
         });
     }
