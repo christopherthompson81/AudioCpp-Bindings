@@ -61,6 +61,18 @@
 
           <Separator Margin="0,6" />
 
+          <CheckBox IsChecked="{Binding UseBuiltInChunking}"
+                    Content="Built-in VAD chunking" />
+          <StackPanel Orientation="Horizontal" Spacing="6" IsEnabled="{Binding UseBuiltInChunking}">
+            <TextBlock Text="chunk s" VerticalAlignment="Center" Opacity="0.7" />
+            <NumericUpDown Value="{Binding ChunkSeconds}" Minimum="1" Maximum="60"
+                           Increment="1" FormatString="0" Width="110" />
+          </StackPanel>
+          <TextBox Text="{Binding VadAssetPath}" IsEnabled="{Binding UseBuiltInChunking}"
+                   PlaceholderText="silero_vad dir (blank = search)" />
+
+          <Separator Margin="0,6" />
+
           <TextBlock Text="Input" FontWeight="SemiBold" />
           <TextBox Text="{Binding Text}" AcceptsReturn="True" Height="80"
                    TextWrapping="Wrap" PlaceholderText="text to synthesise (tts)" />

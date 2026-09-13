@@ -25,6 +25,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _familyHint = "";
     private string _backend = "cpu";
     private int _threads = PhysicalCoreCount();
+    private bool _useBuiltInChunking = true;
+    private double _chunkSeconds = 10;
+    private string _vadAssetPath = "";
     private string _task = "asr";
     private string _audioPath = "";
     private string _text = "The quick brown fox jumps over the lazy dog.";
@@ -76,6 +79,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public string FamilyHint { get => _familyHint; set => Set(ref _familyHint, value); }
     public string Backend { get => _backend; set => Set(ref _backend, value); }
     public int Threads { get => _threads; set => Set(ref _threads, value); }
+
+    /// <summary>Let the engine segment on speech rather than handing it the whole clip.</summary>
+    public bool UseBuiltInChunking { get => _useBuiltInChunking; set => Set(ref _useBuiltInChunking, value); }
+
+    /// <summary>Seconds per chunk. The engine's own default of 2 slices mid-utterance.</summary>
+    public double ChunkSeconds { get => _chunkSeconds; set => Set(ref _chunkSeconds, value); }
+
+    /// <summary>Directory holding silero_vad_16k.safetensors; blank means go looking.</summary>
+    public string VadAssetPath { get => _vadAssetPath; set => Set(ref _vadAssetPath, value); }
     public string Task { get => _task; set => Set(ref _task, value); }
     public string AudioPath { get => _audioPath; set => Set(ref _audioPath, value); }
 
@@ -241,11 +253,31 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
             await System.Threading.Tasks.Task.Run(() =>
             {
+                // Read the audio before the session is built: how long the clip is decides
+                // whether the chunking preset applies, and the preset carries session
+                // options, which have to be settled before CreateSession.
+                (float[] Samples, int SampleRate, int Channels)? clip = null;
+                if (Task != "tts")
+                {
+                    if (AudioPath.Length == 0)
+                        throw new InvalidOperationException("Select a WAV file first.");
+                    clip = Wav.Read(AudioPath);
+                }
+
                 // One session per task/backend/threads combination, reused across runs.
                 var sessionOptions = Options
                     .Where(o => o.Scope == nameof(AudioCppOptionScope.Session) && o.Value.Length > 0)
                     .Select(o => new KeyValuePair<string, string>(o.Name, o.Value))
                     .ToList();
+
+                var seconds = clip is { } c && c.SampleRate > 0
+                    ? (double)c.Samples.Length / c.Channels / c.SampleRate
+                    : 0;
+                var chunking = ChunkingPreset(seconds);
+                foreach (var option in chunking.Session)
+                {
+                    if (!sessionOptions.Any(o => o.Key == option.Key)) sessionOptions.Add(option);
+                }
 
                 // Option values are part of the session's identity: a session is built
                 // with them, so changing one has to rebuild it or the edit silently
@@ -262,10 +294,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 }
 
                 using var request = new AudioCppRequest();
+                foreach (var option in chunking.Request)
+                {
+                    request.SetOption(option.Key, option.Value);
+                }
                 foreach (var option in Options.Where(o =>
                              o.Scope == nameof(AudioCppOptionScope.Request) && o.Value.Length > 0))
                 {
-                    request.SetOption(option.Name, option.Value);
+                    request.SetOption(option.Name, option.Value);   // an explicit edit wins
                 }
                 if (Task == "tts")
                 {
@@ -274,18 +310,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 }
                 else
                 {
-                    if (AudioPath.Length == 0) throw new InvalidOperationException("Select a WAV file first.");
-                    var clip = Wav.Read(AudioPath);
+                    var input = clip!.Value;
                     if (_vadModel is not null)
                     {
                         // Segment first, transcribe each stretch of speech separately.
                         // Handing a long recording to the model whole means one encoder
                         // graph over the entire clip, which is both the slower path and
                         // the one that runs out of memory on anything lengthy.
-                        transcript = RunSegmented(clip, rows);
+                        transcript = RunSegmented(input, rows);
                         return;
                     }
-                    request.SetAudio(clip.Samples, clip.SampleRate, clip.Channels);
+                    request.SetAudio(input.Samples, input.SampleRate, input.Channels);
                 }
 
                 using var result = _session!.Run(request);
@@ -488,6 +523,111 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         field = value;
         Notify(name);
         return true;
+    }
+
+    /// <summary>
+    /// Options that put the engine's own VAD chunking in charge of a long recording.
+    /// </summary>
+    /// <remarks>
+    /// Measured on a 10-minute clip: 3.6s at 89.7% agreement against an F32 reference,
+    /// against 35s at 90.9% for segmenting in this app and calling ASR per group, and
+    /// 66.3% for the engine's defaults — its audio_chunk_duration_sec defaults to 2s,
+    /// which slices mid-utterance.
+    ///
+    /// offline_mode=long_form is load-bearing and not obviously so. The engine sizes the
+    /// encoder graph in prepare(), which consults offline_mode but not audio_chunk_mode,
+    /// so asking for vad chunking alone still sizes the graph for the whole recording and
+    /// throws on anything past the full-context ceiling. long_form makes prepare() agree
+    /// with the path the run will take.
+    ///
+    /// Hardcoded per family rather than discovered, which is the exception to how the
+    /// rest of this window works. The shipped Parakeet GGUF embeds a model spec predating
+    /// these controls, so it advertises neither them nor offline_mode — the options
+    /// function, they are simply absent from what the model says about itself. Drop this
+    /// once the package is regenerated and the Options grid will carry them on its own.
+    /// </remarks>
+    /// <summary>
+    /// Clip length past which the engine's own path cannot cope, so the preset takes over.
+    /// </summary>
+    /// <remarks>
+    /// The encoder builds a relative positional encoding sized by max_position_embeddings,
+    /// 5000 frames in the shipped Parakeet config, and throws outright above it. One
+    /// encoder frame is 80ms after the FastConformer's 8x subsampling at a 10ms hop, so
+    /// the wall is 400s; 300s leaves room for a checkpoint configured differently.
+    ///
+    /// Under it, leave the engine alone -- it already switches to bounded windows past
+    /// audio_chunk_threshold_sec. Measured on a 90s clip, the untouched path transcribed
+    /// 236 words in 1.4s and the preset 226 in 1.9s, so applying it everywhere would buy
+    /// nothing and cost accuracy on exactly the clips that never needed it.
+    /// </remarks>
+    private const double FullContextCeilingSeconds = 300;
+
+    private (List<KeyValuePair<string, string>> Session, List<KeyValuePair<string, string>> Request)
+        ChunkingPreset(double seconds)
+    {
+        var session = new List<KeyValuePair<string, string>>();
+        var request = new List<KeyValuePair<string, string>>();
+
+        // Only for audio tasks, only when this app is not segmenting already, and only
+        // for a family known to implement it.
+        if (Task == "tts" || _vadModel is not null || !UseBuiltInChunking) return (session, request);
+        if (_model?.Family != "parakeet_tdt") return (session, request);
+        if (seconds < FullContextCeilingSeconds) return (session, request);
+
+        session.Add(new("parakeet_tdt.offline_mode", "long_form"));
+
+        // vad chunking cuts between utterances; fixed cuts on a timer and loses words at
+        // every boundary. Measured on the same 10-minute clip, vad transcribed 1483 words
+        // and fixed 1372, dropping whole clauses. So prefer vad, but it needs a Silero
+        // checkpoint on disk that the engine looks for relative to the process's working
+        // directory -- fall back rather than fail when this app is not launched from
+        // beside one.
+        var vadAsset = ResolveVadAsset();
+        if (vadAsset is null)
+        {
+            request.Add(new("audio_chunk_mode", "fixed"));
+        }
+        else
+        {
+            request.Add(new("audio_chunk_mode", "vad"));
+            session.Add(new("parakeet_tdt.vad_model_path", vadAsset));
+        }
+
+        request.Add(new("audio_chunk_duration_sec", ChunkSeconds.ToString(
+            System.Globalization.CultureInfo.InvariantCulture)));
+        return (session, request);
+    }
+
+    /// <summary>
+    /// Locate the Silero checkpoint the engine's vad chunker loads, or null if this
+    /// machine has no copy where we can find one.
+    /// </summary>
+    /// <remarks>
+    /// The engine defaults to the relative path assets/framework/models/silero_vad, which
+    /// resolves only when the process runs from an audio.cpp checkout. VadAssetPath lets
+    /// the window say where it really is; otherwise look beside the native library, since
+    /// a build tree sits next to the assets directory it was built from.
+    /// </remarks>
+    private string? ResolveVadAsset()
+    {
+        static string? Check(string? directory) =>
+            directory is { Length: > 0 }
+            && File.Exists(Path.Combine(directory, "silero_vad_16k.safetensors"))
+                ? directory : null;
+
+        if (Check(VadAssetPath) is { } explicitPath) return explicitPath;
+
+        var relative = Path.Combine("assets", "framework", "models", "silero_vad");
+        var roots = new List<string> { Directory.GetCurrentDirectory() };
+        var native = Environment.GetEnvironmentVariable("AUDIOCPP_NATIVE_DIR");
+        for (var dir = native is { Length: > 0 } ? new DirectoryInfo(native) : null;
+             dir is not null; dir = dir.Parent)
+        {
+            roots.Add(dir.FullName);
+        }
+
+        return roots.Select(root => Check(Path.Combine(root, relative)))
+                    .FirstOrDefault(found => found is not null);
     }
 
     /// <summary>

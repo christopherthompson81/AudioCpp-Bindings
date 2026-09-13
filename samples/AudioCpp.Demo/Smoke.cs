@@ -10,7 +10,8 @@ internal static class Smoke
     {
         if (args.Length == 0)
         {
-            Console.WriteLine("usage: --smoke <model-path> [audio.wav] [task] [family-hint]");
+            Console.WriteLine("usage: --smoke <model-path> [audio.wav] [task] [family-hint] "
+                              + "[vad.gguf] [name=value ...]");
             Console.WriteLine("no model given; skipping");
             return 77;
         }
@@ -59,6 +60,21 @@ internal static class Smoke
                 Console.Error.WriteLine($"option must be name=value, got '{assignment}'");
                 return 1;
             }
+            // A few view-model knobs are not declared options -- they configure the
+            // session rather than the request -- but the window exposes them, so the
+            // smoke path needs them too.
+            switch (parts[0])
+            {
+                case "backend": viewModel.Backend = parts[1]; continue;
+                case "threads": viewModel.Threads = int.Parse(parts[1]); continue;
+                case "chunking": viewModel.UseBuiltInChunking = bool.Parse(parts[1]); continue;
+                case "vad_assets": viewModel.VadAssetPath = parts[1]; continue;
+                case "chunk_seconds":
+                    viewModel.ChunkSeconds = double.Parse(
+                        parts[1], System.Globalization.CultureInfo.InvariantCulture);
+                    continue;
+            }
+
             var option = viewModel.Options.FirstOrDefault(o => o.Name == parts[0]);
             if (option is null)
             {
