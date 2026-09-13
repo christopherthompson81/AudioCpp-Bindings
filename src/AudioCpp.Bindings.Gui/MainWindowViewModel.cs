@@ -36,6 +36,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _modelsRoot = DefaultModelsRoot();
     private double _installFraction;
     private string _installStatus = "";
+    private bool _splitLongText = true;
+    private int _chunkBudget = 1000;
+    private readonly List<AudioSegment> _segments = [];
     private CancellationTokenSource? _cancel;
     private string _task = "asr";
     private string _audioPath = "";
@@ -191,6 +194,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     /// <summary>Seconds per chunk. The engine's own default of 2 slices mid-utterance.</summary>
     public double ChunkSeconds { get => _chunkSeconds; set => Set(ref _chunkSeconds, value); }
+
+    /// <summary>
+    /// Synthesise long text in pieces and join the result, rather than handing a
+    /// family more text than it can take in one request.
+    /// </summary>
+    public bool SplitLongText { get => _splitLongText; set => Set(ref _splitLongText, value); }
+
+    /// <summary>Characters per piece. Defaults per family, as the reference does.</summary>
+    public int ChunkBudget { get => _chunkBudget; set => Set(ref _chunkBudget, value); }
+
+    /// <summary>
+    /// The pieces of the last synthesis, kept rather than only the joined clip:
+    /// per-segment audio is what a caption or dubbing workflow actually needs.
+    /// </summary>
+    public IReadOnlyList<AudioSegment> Segments => _segments;
 
     /// <summary>Directory holding silero_vad_16k.safetensors; blank means go looking.</summary>
     public string VadAssetPath { get => _vadAssetPath; set => Set(ref _vadAssetPath, value); }
@@ -443,6 +461,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(SelectedChip));
             Notify(nameof(LoadedModelName));
             Notify(nameof(LoadedModelState));
+            ChunkBudget = TextChunker.DefaultBudget(model.Family);
             IsLoaded = true;
             Status = $"Loaded {model.Family} — {Options.Count} declared option(s), read from the model."
                    + (_vadModel is not null ? $"  VAD: {_vadModel.Family}." : "");
@@ -530,6 +549,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 }
                 if (Task == "tts")
                 {
+                    // Long text goes piece by piece against one session; handing a
+                    // family more than it can take in a request either truncates or
+                    // throws, depending on the family.
+                    var pieces = SplitLongText
+                        ? TextChunker.Split(Text, Math.Max(1, ChunkBudget))
+                        : [Text];
+
+                    if (pieces.Count > 1)
+                    {
+                        transcript = RunLongText(pieces, rows);
+                        return;
+                    }
+
                     request.SetText(Text, "en-us");
                     if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
                 }
@@ -610,6 +642,60 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Busy = false;
             SaveWavCommand.RaiseCanExecuteChanged();
         }
+    }
+
+    /// <summary>
+    /// Synthesise each piece of a long text against the one session and join the
+    /// results. Segments are kept individually as well as joined -- a caption or
+    /// dubbing workflow wants the pieces, not only the merged clip.
+    /// </summary>
+    private string RunLongText(List<string> pieces, List<ResultRow> rows)
+    {
+        _segments.Clear();
+        var cancelled = false;
+
+        for (var index = 0; index < pieces.Count; index++)
+        {
+            if (_cancel?.IsCancellationRequested == true) { cancelled = true; break; }
+
+            var piece = pieces[index];
+            using var request = new AudioCppRequest();
+            foreach (var option in Options.Where(o =>
+                         o.Scope == nameof(AudioCppOptionScope.Request) && o.Value.Length > 0))
+            {
+                request.SetOption(option.Name, option.Value);
+            }
+            request.SetText(piece, "en-us");
+            if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
+
+            using var result = _session!.Run(request);
+            if (result.Audio is not { } audio) continue;
+
+            var segment = new AudioSegment(
+                index + 1, piece, audio.Samples, audio.SampleRate, audio.Channels);
+            _segments.Add(segment);
+            rows.Add(new ResultRow(
+                "segment",
+                $"{segment.Seconds:F2}s",
+                piece.Length > 80 ? piece[..80] + "…" : piece,
+                $"{segment.Samples.Length} samples"));
+        }
+
+        if (_segments.Count == 0)
+        {
+            _segmentedSummary = "Synthesis produced no audio.";
+            return "";
+        }
+
+        var (samples, rate, channels) = AudioJoin.Concatenate(_segments);
+        _outputSamples = samples;
+        _outputSampleRate = rate;
+        _outputChannels = channels;
+
+        var seconds = _segments.Sum(seg => seg.Seconds);
+        _segmentedSummary = $"{_segments.Count} of {pieces.Count} piece(s), {seconds:F1}s"
+                          + (cancelled ? ".  Cancelled part-way." : ".");
+        return string.Join(" ", _segments.Select(seg => seg.Text));
     }
 
     /// <summary>

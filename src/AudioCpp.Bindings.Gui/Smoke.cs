@@ -69,6 +69,9 @@ internal static class Smoke
                 case "threads": viewModel.Threads = int.Parse(parts[1]); continue;
                 case "chunking": viewModel.UseBuiltInChunking = bool.Parse(parts[1]); continue;
                 case "vad_assets": viewModel.VadAssetPath = parts[1]; continue;
+                case "split": viewModel.SplitLongText = bool.Parse(parts[1]); continue;
+                case "budget": viewModel.ChunkBudget = int.Parse(parts[1]); continue;
+                case "text": viewModel.Text = parts[1]; continue;
                 case "chunk_seconds":
                     viewModel.ChunkSeconds = double.Parse(
                         parts[1], System.Globalization.CultureInfo.InvariantCulture);
@@ -90,6 +93,15 @@ internal static class Smoke
 
         if (viewModel.Transcript.Length > 0) Console.WriteLine($"transcript: {viewModel.Transcript}");
         if (viewModel.OutputSamples.Length > 0) Console.WriteLine($"audio: {viewModel.OutputSummary}");
+        if (viewModel.Segments.Count > 0)
+        {
+            Console.WriteLine($"segments: {viewModel.Segments.Count}");
+            foreach (var segment in viewModel.Segments.Take(4))
+            {
+                Console.WriteLine($"  #{segment.Index} {segment.Seconds:F2}s  "
+                                  + $"{segment.SampleRate} Hz  {segment.Text.Length} chars");
+            }
+        }
         foreach (var row in viewModel.Rows.Take(6))
         {
             Console.WriteLine($"  {row.Kind,-9} {row.Span,-16} {row.Value}");

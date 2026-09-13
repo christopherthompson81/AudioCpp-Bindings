@@ -209,6 +209,17 @@
               <TextBox Text="{Binding Text}" AcceptsReturn="True" Height="110"
                        TextWrapping="Wrap" PlaceholderText="Enter the text…" />
 
+              <Grid ColumnDefinitions="*,Auto">
+                <CheckBox Grid.Column="0" IsChecked="{Binding SplitLongText}"
+                          Content="Split and merge long text" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                            IsEnabled="{Binding SplitLongText}">
+                  <TextBlock Text="chars per chunk" Classes="Subtle" VerticalAlignment="Center" />
+                  <NumericUpDown Value="{Binding ChunkBudget}" Minimum="1" Maximum="20000"
+                                 Increment="100" FormatString="0" Width="130" />
+                </StackPanel>
+              </Grid>
+
               <TextBlock Text="Voice id" Classes="Label" />
               <TextBox Text="{Binding VoiceId}" PlaceholderText="optional, e.g. af_heart" />
 
