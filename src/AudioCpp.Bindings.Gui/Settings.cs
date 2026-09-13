@@ -55,6 +55,16 @@ public sealed record Settings
 
     public string? AudioPath { get; init; }
     public string? VoiceId { get; init; }
+    /// <summary>
+    /// The request language, in whatever spelling the model uses.
+    /// </summary>
+    /// <remarks>
+    /// Families disagree — "en" for one, "english" for another — so a saved
+    /// value is only meaningful against the model that produced it. Loading a
+    /// model that does not declare it falls back to letting the model decide.
+    /// </remarks>
+    public string? SpeechLanguage { get; init; }
+
     public bool? ShowAllOptions { get; init; }
 }
 

@@ -154,7 +154,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         nameof(ModelPath), nameof(FamilyHint), nameof(ModelsRoot),
         nameof(SelectedPackages), nameof(VadModelPath), nameof(VadAssetPath), nameof(MinSegmentSpan), nameof(MaxSegmentSpan),
         nameof(UseBuiltInChunking), nameof(ChunkSeconds), nameof(SplitLongText), nameof(ChunkBudget),
-        nameof(AudioPath), nameof(VoiceId), nameof(ShowAllOptions),
+        nameof(AudioPath), nameof(VoiceId), nameof(SpeechLanguage), nameof(ShowAllOptions),
     ];
 
     /// <summary>Where settings are kept, so a user can find or delete the file.</summary>
@@ -181,6 +181,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ChunkBudget = ChunkBudget,
         AudioPath = AudioPath,
         VoiceId = VoiceId,
+        SpeechLanguage = SpeechLanguage,
         ShowAllOptions = ShowAllOptions,
     };
 
@@ -235,6 +236,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             // reads as the app being broken rather than as the file being gone.
             if (saved.AudioPath is { Length: > 0 } audio && File.Exists(audio)) AudioPath = audio;
             if (saved.VoiceId is { } voiceId) VoiceId = voiceId;
+            // Kept even though no model is loaded yet to validate it against:
+            // the load drops it if the model does not declare it.
+            if (saved.SpeechLanguage is { } speechLanguage) SpeechLanguage = speechLanguage;
             if (saved.ShowAllOptions is { } showAll) ShowAllOptions = showAll;
 
             // Explicitly, not as a side effect of setting the workflow: a saved
@@ -1729,6 +1733,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     {
                         request.SetText(Text, SpeechLanguage.Length > 0 ? SpeechLanguage : null);
                     }
+                }
+
+                // Transcription never calls SetText, so a language chosen there
+                // would have been offered and then dropped. The ABI writes the
+                // option itself for a non-empty language on SetText, so this
+                // covers the tasks that path does not reach.
+                if (!ShowText && SpeechLanguage.Length > 0)
+                {
+                    request.SetOption("language", SpeechLanguage);
                 }
 
                 if (ShowVoiceDescription && VoiceDescription.Length > 0)
