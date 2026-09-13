@@ -53,6 +53,9 @@
   <data name="theme.label" xml:space="preserve">
     <value>⟦Thémé⟧</value>
   </data>
+  <data name="nav.server" xml:space="preserve">
+    <value>⟦Sérvér⟧</value>
+  </data>
   <data name="theme.system" xml:space="preserve">
     <value>⟦Sýstém⟧</value>
   </data>
@@ -85,6 +88,12 @@
   </data>
   <data name="section.events" xml:space="preserve">
     <value>⟦ÉVÉNTS⟧</value>
+  </data>
+  <data name="server.config" xml:space="preserve">
+    <value>⟦CÓNFÍGÚRÁTÍÓN⟧</value>
+  </data>
+  <data name="server.models" xml:space="preserve">
+    <value>⟦MÓDÉLS⟧</value>
   </data>
   <data name="studio.eyebrow" xml:space="preserve">
     <value>⟦LÓCÁL ÁÚDÍÓ ÍNTÉLLÍGÉNCÉ⟧</value>
@@ -142,6 +151,15 @@
   </data>
   <data name="action.compare" xml:space="preserve">
     <value>⟦Cómpáré⟧</value>
+  </data>
+  <data name="action.start" xml:space="preserve">
+    <value>⟦Stárt⟧</value>
+  </data>
+  <data name="action.add" xml:space="preserve">
+    <value>⟦Ádd⟧</value>
+  </data>
+  <data name="action.remove" xml:space="preserve">
+    <value>⟦Rémóvé⟧</value>
   </data>
   <data name="request.text" xml:space="preserve">
     <value>⟦Téxt⟧</value>

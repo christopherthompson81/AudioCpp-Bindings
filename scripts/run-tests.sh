@@ -96,6 +96,17 @@ coverage_status=$?
 [ $coverage_status -ne 0 ] && [ $coverage_status -ne 77 ] && exit 1
 
 echo
+# Model-free: binds a real socket and serves real requests. The server is where
+# the bindings get used from threads the window never uses them from.
+echo "== server =="
+# The routes that need a model run when one is named. Point AUDIOCPP_TTS_MODEL
+# at a TTS gguf (and optionally AUDIOCPP_VOICE_REF plus AUDIOCPP_VOICE_REF_TEXT
+# at a reference clip and its transcript) to exercise them.
+run tests/AudioCpp.ServerTest/AudioCpp.ServerTest.csproj
+server_status=$?
+[ $server_status -ne 0 ] && [ $server_status -ne 77 ] && exit 1
+
+echo
 # Also model-free: parses the specs and checks the install layout. Network
 # checks are opt-in, so this stays fast and offline by default.
 echo "== package catalog =="

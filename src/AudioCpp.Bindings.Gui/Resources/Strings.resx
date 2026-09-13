@@ -61,6 +61,9 @@
   <data name="theme.label" xml:space="preserve">
     <value>Theme</value>
   </data>
+  <data name="nav.server" xml:space="preserve">
+    <value>Server</value>
+  </data>
   <data name="theme.system" xml:space="preserve">
     <value>System</value>
   </data>
@@ -94,6 +97,12 @@
   </data>
   <data name="section.events" xml:space="preserve">
     <value>EVENTS</value>
+  </data>
+  <data name="server.config" xml:space="preserve">
+    <value>CONFIGURATION</value>
+  </data>
+  <data name="server.models" xml:space="preserve">
+    <value>MODELS</value>
   </data>
   <!-- Page headings. -->
   <data name="studio.eyebrow" xml:space="preserve">
@@ -153,6 +162,15 @@
   </data>
   <data name="action.compare" xml:space="preserve">
     <value>Compare</value>
+  </data>
+  <data name="action.start" xml:space="preserve">
+    <value>Start</value>
+  </data>
+  <data name="action.add" xml:space="preserve">
+    <value>Add</value>
+  </data>
+  <data name="action.remove" xml:space="preserve">
+    <value>Remove</value>
   </data>
   <!-- Input labels. -->
   <data name="request.text" xml:space="preserve">

@@ -57,6 +57,7 @@ public static class Strings
     // Navigation and chrome.
     public static string AppSubtitle => Get("app.nativeStudio");
     public static string NavStudio => Get("nav.studio");
+    public static string NavServer => Get("nav.server");
     public static string NavArena => Get("nav.arena");
     public static string NavRuntime => Get("nav.runtime");
     public static string LanguageLabel => Get("language.label");
@@ -92,6 +93,11 @@ public static class Strings
     public static string Play => Get("action.play");
     public static string Pause => Get("action.pause");
     public static string Record => Get("action.record");
+    public static string Start => Get("action.start");
+    public static string Add => Get("action.add");
+    public static string Remove => Get("action.remove");
+    public static string ServerConfig => Get("server.config");
+    public static string ServerModels => Get("server.models");
     public static string Stop => Get("action.stop");
     public static string Compare => Get("action.compare");
 

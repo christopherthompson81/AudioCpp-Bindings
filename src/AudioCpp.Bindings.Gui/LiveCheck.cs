@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using AudioCpp;
 
 namespace AudioCpp.Bindings.Gui;
 
@@ -931,6 +932,73 @@ internal static class LiveCheck
                     Environment.Exit(failures == 0 ? 0 : 1);
                     return;
                 }
+
+            // The page drives a real server, so the check talks to it over
+            // HTTP the way a client would rather than reading the page's
+            // own state back to itself.
+            if (args.Contains("--server-check"))
+            {
+                void Expect(string what, bool ok, string detail = "")
+                {
+                    Console.WriteLine($"  {(ok ? "ok  " : "FAIL")}  {what}"
+                                      + (detail.Length > 0 ? $"  {detail}" : ""));
+                    if (!ok) failures++;
+                }
+
+                var server = viewModel.Server;
+                server.Port = 18500 + Random.Shared.Next(300);
+                server.AddModelCommand.Execute(null);
+                await Task.Delay(100);
+                Expect("adding a model gives it an id",
+                       server.Models.Count == 1 && server.Models[0].Id.Length > 0);
+
+                // A row with no path can never serve, and lazy loading means
+                // the request that discovers it could be hours away.
+                await server.StartCommand.ExecuteAsync();
+                await Task.Delay(200);
+                Expect("a model with no path stops the start",
+                       !server.IsRunning && server.Status.Contains("no path", StringComparison.Ordinal),
+                       server.Status);
+
+                server.Models[0].Path = args.FirstOrDefault(a => a.StartsWith("model="))
+                    ?["model=".Length..] ?? "/models/not-loaded-because-lazy.gguf";
+
+                await server.StartCommand.ExecuteAsync();
+                await Task.Delay(500);
+                Console.WriteLine($"  state {server.State} at {server.Address}");
+                Expect("the page starts it", server.IsRunning, server.Status);
+
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+                var health = await client.GetStringAsync($"{server.Address}/health");
+                Console.WriteLine($"  GET /health -> {health}");
+                Expect("a client outside the app can reach it",
+                       health.Contains("\"status\":\"ok\"", StringComparison.Ordinal));
+                Expect("it reports the configured model count",
+                       health.Contains("\"models\":1", StringComparison.Ordinal));
+
+                // The page shows what the endpoint said, not what the flag
+                // beside it believes.
+                await Task.Delay(2500);
+                Console.WriteLine($"  page health: {server.Health}");
+                Expect("the page polls the endpoint it serves",
+                       server.Health.Contains("\"status\"", StringComparison.Ordinal));
+
+                Expect("something reached the log", server.Log.Count > 0,
+                       server.Log.Count > 0 ? server.Log[^1] : "");
+
+                await server.StopCommand.ExecuteAsync();
+                await Task.Delay(300);
+                Expect("the page stops it", !server.IsRunning);
+
+                var reachable = true;
+                try { await client.GetStringAsync($"{server.Address}/health"); }
+                catch (HttpRequestException) { reachable = false; }
+                Expect("and it really is gone", !reachable);
+
+                Console.WriteLine(failures == 0 ? "server page OK" : $"server page: {failures} failure(s)");
+                Environment.Exit(failures == 0 ? 0 : 1);
+                return;
+            }
 
                 if (args.Contains("--strings-check"))
                 {

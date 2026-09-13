@@ -6,6 +6,7 @@ using AudioCpp.Native;
 using AudioCpp.Packages;
 using AudioCpp.Audio;
 using Avalonia.Threading;
+using AudioCpp;
 
 namespace AudioCpp.Bindings.Gui;
 
@@ -579,7 +580,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// thing visible in a Russian screenshot.
     /// </remarks>
     public ObservableCollection<Choice> Pages { get; } =
-        [new("Studio", ""), new("Arena", ""), new("Runtime", "")];
+        [new("Studio", ""), new("Server", ""), new("Arena", ""), new("Runtime", "")];
+
+    /// <summary>The HTTP server this app can run, and the page that drives it.</summary>
+    public ServerPage Server { get; } = new();
 
     public Choice? SelectedPage
     {
@@ -813,6 +817,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             if (!Set(ref _page, value)) return;
             Notify(nameof(IsStudio));
+            Notify(nameof(IsServer));
             Notify(nameof(IsArena));
             Notify(nameof(IsRuntime));
             Notify(nameof(SelectedPage));
@@ -821,6 +826,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public bool IsStudio => _page == "Studio";
+    public bool IsServer => _page == "Server";
     public bool IsArena => _page == "Arena";
     public bool IsRuntime => _page == "Runtime";
 
