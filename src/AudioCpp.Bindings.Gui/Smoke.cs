@@ -77,6 +77,10 @@ internal static class Smoke
                 case "split": viewModel.SplitLongText = bool.Parse(parts[1]); continue;
                 case "budget": viewModel.ChunkBudget = int.Parse(parts[1]); continue;
                 case "text": viewModel.Text = parts[1]; continue;
+                case "capture":
+                    viewModel.CaptureDevice = viewModel.CaptureDevices
+                        .FirstOrDefault(d => d.Index == int.Parse(parts[1]));
+                    continue;
                 case "chunk_seconds":
                     viewModel.ChunkSeconds = double.Parse(
                         parts[1], System.Globalization.CultureInfo.InvariantCulture);
@@ -91,6 +95,31 @@ internal static class Smoke
             }
             option.Value = parts[1];
             Console.WriteLine($"set {option.Scope} {option.Name}={parts[1]}");
+        }
+
+        // --record exercises the microphone path headlessly: start, let audio
+        // flow, stop, and report what came back. It cannot catch a cross-thread
+        // bug -- only a real window can -- but it proves the pump and the engine
+        // agree.
+        if (args.Contains("--record"))
+        {
+            Console.WriteLine($"inputs: {viewModel.CaptureDevices.Count}  {viewModel.LiveStatus}");
+            var seconds = 6;
+            await viewModel.RecordCommand.ExecuteAsync();
+            Console.WriteLine($"recording: {viewModel.IsRecording}  {viewModel.Status}");
+            if (!viewModel.IsRecording) { Console.Error.WriteLine("did not start"); return 1; }
+
+            var peak = 0f;
+            for (var i = 0; i < seconds * 4; i++)
+            {
+                await System.Threading.Tasks.Task.Delay(250);
+                peak = Math.Max(peak, viewModel.InputLevel);
+            }
+            await viewModel.RecordCommand.ExecuteAsync();
+            Console.WriteLine($"stopped: {viewModel.Status}");
+            Console.WriteLine($"peak level: {peak:F4}");
+            Console.WriteLine($"transcript: {viewModel.Transcript}");
+            return viewModel.IsRecording ? 1 : 0;
         }
 
         await viewModel.RunCommand.ExecuteAsync();

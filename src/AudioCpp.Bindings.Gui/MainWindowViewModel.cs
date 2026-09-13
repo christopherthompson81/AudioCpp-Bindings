@@ -4,6 +4,8 @@ using System.Text;
 using System.Runtime.CompilerServices;
 using AudioCpp.Native;
 using AudioCpp.Packages;
+using AudioCpp.Audio;
+using Avalonia.Threading;
 
 namespace AudioCpp.Bindings.Gui;
 
@@ -40,6 +42,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private int _chunkBudget = 1000;
     private readonly List<AudioSegment> _segments = [];
     private CancellationTokenSource? _cancel;
+    private LiveTranscription? _live;
+    private CaptureDeviceInfo? _captureDevice;
+    private bool _isRecording;
+    private float _inputLevel;
+    private string _liveStatus = "";
     private string _task = "asr";
     private string _audioPath = "";
     private string _text = "The quick brown fox jumps over the lazy dog.";
@@ -76,7 +83,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         DeleteCommand = new RelayCommand(
             DeleteAsync, () => !_busy && _selectedEntry is { State: not InstallState.Missing });
 
+        RecordCommand = new RelayCommand(
+            ToggleRecordingAsync,
+            () => _isRecording || (!_busy && _isLoaded && _task == "asr"));
+
         LoadCatalog();
+        LoadCaptureDevices();
     }
 
     public RelayCommand LoadCommand { get; }
@@ -96,6 +108,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     /// <summary>Remove an installed package's files from the models root.</summary>
     public RelayCommand DeleteCommand { get; }
+
+    /// <summary>Start or stop microphone transcription.</summary>
+    public RelayCommand RecordCommand { get; }
 
     /// <summary>Set by the view so file pickers can be opened from here.</summary>
     public Func<string, bool, Task<string?>>? PickPath { get; set; }
@@ -118,6 +133,36 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         get => TaskChips.FirstOrDefault(c => c.Task == _task);
         set { if (value is not null) Task = value.Task; }
     }
+
+    /// <summary>Capture devices the system offers, refreshed on demand.</summary>
+    public ObservableCollection<CaptureDeviceInfo> CaptureDevices { get; } = [];
+
+    /// <summary>Null means the system default, which is what most users want.</summary>
+    public CaptureDeviceInfo? CaptureDevice
+    {
+        get => _captureDevice;
+        set => Set(ref _captureDevice, value);
+    }
+
+    public bool IsRecording
+    {
+        get => _isRecording;
+        private set
+        {
+            if (!Set(ref _isRecording, value)) return;
+            Notify(nameof(RecordLabel));
+            RecordCommand.RaiseCanExecuteChanged();
+            RunCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    public string RecordLabel => _isRecording ? "Stop" : "Record";
+
+    /// <summary>Peak level 0..1 for the meter.</summary>
+    public float InputLevel { get => _inputLevel; private set => Set(ref _inputLevel, value); }
+
+    /// <summary>Device, backend, and any dropped frames.</summary>
+    public string LiveStatus { get => _liveStatus; private set => Set(ref _liveStatus, value); }
 
     /// <summary>Every installable package, read from audio.cpp's model_specs.</summary>
     public List<CatalogEntry> AllEntries { get; } = [];
@@ -997,6 +1042,81 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         DeleteCommand.RaiseCanExecuteChanged();
         Notify(nameof(SelectedSummary));
         return System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    private void LoadCaptureDevices()
+    {
+        try
+        {
+            CaptureDevices.Clear();
+            foreach (var device in AudioCapture.Devices()) CaptureDevices.Add(device);
+            CaptureDevice = CaptureDevices.FirstOrDefault(d => d.IsDefault);
+            LiveStatus = $"{CaptureDevices.Count} input(s) via {AudioCapture.Backend}";
+        }
+        catch (DllNotFoundException)
+        {
+            // Capture is optional: the rest of the app works without it.
+            LiveStatus = "audio capture unavailable (build native/audiocapture)";
+        }
+    }
+
+    /// <summary>
+    /// Toggle live transcription.
+    /// </summary>
+    /// <remarks>
+    /// The pump runs on its own thread and reports through callbacks, so every
+    /// one of them hops to the UI thread before touching bound state. Avalonia
+    /// will not always throw when this is got wrong -- it sometimes just stops
+    /// updating -- which is why it is done explicitly rather than by habit.
+    /// </remarks>
+    private async Task ToggleRecordingAsync()
+    {
+        if (_live is not null)
+        {
+            var final = await _live.StopAsync();
+            _live.Dispose();
+            _live = null;
+            IsRecording = false;
+            InputLevel = 0;
+
+            if (final.Length > 0) Transcript = final;
+            Status = final.Length > 0
+                ? $"Recorded {final.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length} words."
+                : "Stopped; nothing was transcribed.";
+            return;
+        }
+
+        if (_model is null) { Status = "Load a model first."; return; }
+
+        try
+        {
+            Transcript = "";
+            Rows.Clear();
+
+            _live = LiveTranscription.Start(_model, Backend, Threads, CaptureDevice);
+            _live.OnText = text => Dispatcher.UIThread.Post(() => Transcript = text);
+            _live.OnLevel = (peak, dropped) => Dispatcher.UIThread.Post(() =>
+            {
+                InputLevel = peak;
+                if (dropped > 0) LiveStatus = $"dropped {dropped} frames — the UI is not draining fast enough";
+            });
+            _live.OnError = error => Dispatcher.UIThread.Post(() =>
+            {
+                Status = Describe(error);
+                _ = ToggleRecordingAsync();
+            });
+
+            IsRecording = true;
+            Status = $"Recording from {CaptureDevice?.Name ?? "the default input"}…";
+        }
+        catch (Exception exception) when (exception is AudioCppException
+                                          or InvalidOperationException or DllNotFoundException)
+        {
+            _live?.Dispose();
+            _live = null;
+            IsRecording = false;
+            Status = Describe(exception);
+        }
     }
 
     private Task CancelAsync()
