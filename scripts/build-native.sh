@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Builds the audiocapture shim. CMake rather than NuGet, because miniaudio is a
+# Builds the audioio shim. CMake rather than NuGet, because miniaudio is a
 # single C header compiled for this machine; there is no prebuilt package.
 #
-# The output lands in native/audiocapture/build, which is one of the places the
+# The output lands in native/audioio/build, which is one of the places the
 # managed resolver looks, so nothing needs configuring after a build.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-src="$here/native/audiocapture"
+src="$here/native/audioio"
 out="$src/build"
 
 generator=()
@@ -18,4 +18,4 @@ cmake --build "$out" --config Release --parallel
 
 echo
 echo "built:"
-find "$out" -maxdepth 2 \( -name 'libaudiocapture.*' -o -name 'audiocapture.dll' \) -print
+find "$out" -maxdepth 2 \( -name 'libaudioio.*' -o -name 'audioio.dll' \) -print

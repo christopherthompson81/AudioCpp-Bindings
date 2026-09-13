@@ -4,8 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>AudioCpp.CaptureTest</AssemblyName>
-    <RootNamespace>AudioCpp.CaptureTest</RootNamespace>
+    <AssemblyName>AudioCpp.AudioTest</AssemblyName>
+    <RootNamespace>AudioCpp.AudioTest</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/AudioCpp.Audio/AudioCpp.Audio.csproj" />

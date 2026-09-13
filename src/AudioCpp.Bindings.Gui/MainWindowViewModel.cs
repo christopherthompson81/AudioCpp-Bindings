@@ -48,6 +48,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private bool _isRecording;
     private float _inputLevel;
     private string _liveStatus = "";
+    private AudioPlayer? _player;
+    private DispatcherTimer? _playTimer;
+    private double _playProgress = -1;
+    private ResultRow? _selectedRow;
+    private string _playStatus = "";
     private string _task = "asr";
     private string _audioPath = "";
     private string _text = "The quick brown fox jumps over the lazy dog.";
@@ -88,6 +93,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             ToggleRecordingAsync,
             () => _isRecording || (!_busy && _isLoaded && _task == "asr"));
 
+        PlayCommand = new RelayCommand(TogglePlaybackAsync, () => HasPreviewAudio);
+
         LoadCatalog();
         LoadCaptureDevices();
     }
@@ -112,6 +119,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     /// <summary>Start or stop microphone transcription.</summary>
     public RelayCommand RecordCommand { get; }
+
+    /// <summary>Play or pause the preview.</summary>
+    public RelayCommand PlayCommand { get; }
 
     /// <summary>Set by the view so file pickers can be opened from here.</summary>
     public Func<string, bool, Task<string?>>? PickPath { get; set; }
@@ -158,6 +168,62 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public string RecordLabel => _isRecording ? "Stop" : "Record";
+
+    /// <summary>
+    /// Something to play: generated output, or the loaded input clip. Output
+    /// wins, since after a TTS run that is what the user just made.
+    /// </summary>
+    public bool HasPreviewAudio => _outputSamples is { Length: > 0 } || _inputClip is not null;
+
+    public string PlayLabel => _player?.IsPlaying == true ? "Pause" : "Play";
+
+    /// <summary>Playhead as a fraction, or negative when there is nothing to show.</summary>
+    public double PlayProgress { get => _playProgress; private set => Set(ref _playProgress, value); }
+
+    public string PlayStatus { get => _playStatus; private set => Set(ref _playStatus, value); }
+
+    /// <summary>
+    /// Selecting a result row seeks the preview to it.
+    /// </summary>
+    /// <remarks>
+    /// The reason the rows carry sample offsets rather than only a formatted
+    /// span: a transcript line is a position in the audio, and being able to
+    /// jump to it is what makes a result inspectable rather than a wall of text.
+    /// </remarks>
+    public ResultRow? SelectedRow
+    {
+        get => _selectedRow;
+        set
+        {
+            if (!Set(ref _selectedRow, value)) return;
+            if (value is not { StartSample: >= 0 } row) return;
+            SeekToSample(row.StartSample);
+        }
+    }
+
+    /// <summary>
+    /// Seek the preview to an absolute sample offset in the source audio.
+    /// Opens a player if none is running, so a click works before Play is hit.
+    /// </summary>
+    private void SeekToSample(long sample)
+    {
+        if (_player is null && !TryOpenPlayer()) return;
+        if (_player is null) return;
+
+        // Offsets are in source frames; the player may hold a different clip
+        // only if the output replaced the input, in which case they still share
+        // a sample rate for every family seen so far.
+        _player.Position = sample;
+        UpdatePlayProgress();
+    }
+
+    /// <summary>Handed to the waveform so a click seeks.</summary>
+    public Action<double> SeekTo => fraction =>
+    {
+        if (_player is null) return;
+        _player.PositionSeconds = fraction * _player.LengthSeconds;
+        UpdatePlayProgress();
+    };
 
     /// <summary>Peak level 0..1 for the meter.</summary>
     public float InputLevel { get => _inputLevel; private set => Set(ref _inputLevel, value); }
@@ -569,6 +635,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Rows.Clear();
         Transcript = "";
         _outputSamples = null;
+        ResetPlayer();
         _cancel = new CancellationTokenSource();
         CancelCommand.RaiseCanExecuteChanged();
         try
@@ -588,6 +655,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     if (AudioPath.Length == 0)
                         throw new InvalidOperationException("Select a WAV file first.");
                     clip = Wav.Read(AudioPath);
+                    _inputClip = clip;
                 }
 
                 // One session per task/backend/threads combination, reused across runs.
@@ -677,17 +745,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 foreach (var segment in result.Segments)
                 {
                     rows.Add(new ResultRow("segment", Span(segment.StartSample, segment.EndSample),
-                        segment.Text, segment.Confidence.ToString("F3")));
+                        segment.Text, segment.Confidence.ToString("F3"),
+                        segment.StartSample, segment.EndSample));
                 }
                 foreach (var turn in result.SpeakerTurns)
                 {
                     rows.Add(new ResultRow("speaker", Span(turn.StartSample, turn.EndSample),
-                        turn.SpeakerId, turn.Confidence.ToString("F3")));
+                        turn.SpeakerId, turn.Confidence.ToString("F3"),
+                        turn.StartSample, turn.EndSample));
                 }
                 foreach (var word in result.Words)
                 {
                     rows.Add(new ResultRow("word", Span(word.StartSample, word.EndSample),
-                        word.Word, word.Confidence.ToString("F3")));
+                        word.Word, word.Confidence.ToString("F3"),
+                        word.StartSample, word.EndSample));
                 }
                 foreach (var stream in result.NamedAudio)
                 {
@@ -703,6 +774,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
             _lastRunSeconds = (DateTime.UtcNow - started).TotalSeconds;
             Notify(nameof(RunState));
+            Notify(nameof(HasPreviewAudio));
+            PlayCommand.RaiseCanExecuteChanged();
             ResultJson = BuildResultJson(rows, transcript);
             Transcript = transcript;
             foreach (var row in rows) Rows.Add(row);
@@ -1055,6 +1128,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// none is, and used both by the Record button and on shutdown -- without
     /// the latter the microphone stays open until the process exits.
     /// </summary>
+    /// <summary>Release audio devices held for preview and capture.</summary>
+    public async Task StopAudioAsync()
+    {
+        ResetPlayer();
+        await StopRecordingAsync();
+    }
+
     public async Task StopRecordingAsync()
     {
         if (_live is null) return;
@@ -1069,6 +1149,101 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         InputLevel = 0;
     }
 
+    /// <summary>
+    /// The clip currently loaded for input, kept so it can be previewed without
+    /// reading the file again.
+    /// </summary>
+    private (float[] Samples, int SampleRate, int Channels)? _inputClip;
+
+    private async Task TogglePlaybackAsync()
+    {
+        if (_player is { IsPlaying: true })
+        {
+            _player.Pause();
+            StopPlayTimer();
+            Notify(nameof(PlayLabel));
+            return;
+        }
+
+        if (_player is null && !TryOpenPlayer()) return;
+        if (_player is null) return;
+
+        _player.Play();
+        StartPlayTimer();
+        Notify(nameof(PlayLabel));
+        await System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    private bool TryOpenPlayer()
+    {
+        var clip = _outputSamples is { Length: > 0 }
+            ? (_outputSamples, _outputSampleRate, _outputChannels)
+            : _inputClip;
+        if (clip is null) return false;
+
+        try
+        {
+            _player = AudioPlayer.Open(clip.Value.Samples, clip.Value.SampleRate, clip.Value.Channels);
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException
+                                          or DllNotFoundException or ArgumentException)
+        {
+            PlayStatus = Describe(exception);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The playhead is driven from a UI timer rather than a callback: position
+    /// lives on the audio thread, and 20 fps is enough for a cursor while
+    /// costing nothing.
+    /// </summary>
+    private void StartPlayTimer()
+    {
+        _playTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _playTimer.Tick -= OnPlayTick;
+        _playTimer.Tick += OnPlayTick;
+        _playTimer.Start();
+    }
+
+    private void StopPlayTimer() => _playTimer?.Stop();
+
+    private void OnPlayTick(object? sender, EventArgs e)
+    {
+        UpdatePlayProgress();
+        if (_player?.IsPlaying != true)
+        {
+            StopPlayTimer();
+            Notify(nameof(PlayLabel));
+        }
+    }
+
+    private void UpdatePlayProgress()
+    {
+        if (_player is null) { PlayProgress = -1; PlayStatus = ""; return; }
+        var length = _player.LengthSeconds;
+        PlayProgress = length > 0 ? _player.PositionSeconds / length : -1;
+        PlayStatus = $"{_player.PositionSeconds:F1} / {length:F1}s";
+    }
+
+    /// <summary>
+    /// Drop the player so the next preview picks up whatever is current. Called
+    /// when the audio underneath changes, which is the only time a stale player
+    /// would otherwise keep playing the previous clip.
+    /// </summary>
+    private void ResetPlayer()
+    {
+        StopPlayTimer();
+        _player?.Dispose();
+        _player = null;
+        PlayProgress = -1;
+        PlayStatus = "";
+        Notify(nameof(PlayLabel));
+        Notify(nameof(HasPreviewAudio));
+        PlayCommand.RaiseCanExecuteChanged();
+    }
+
     private void LoadCaptureDevices()
     {
         try
@@ -1081,7 +1256,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         catch (DllNotFoundException)
         {
             // Capture is optional: the rest of the app works without it.
-            LiveStatus = "audio capture unavailable (build native/audiocapture)";
+            LiveStatus = "audio capture unavailable (build native/audioio)";
         }
     }
 
@@ -1395,7 +1570,17 @@ public sealed class DeclaredOption(
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
-public readonly record struct ResultRow(string Kind, string Span, string Value, string Detail);
+/// <summary>
+/// One line of a result.
+/// </summary>
+/// <param name="StartSample">
+/// Kept alongside the formatted <paramref name="Span"/> so a click can seek.
+/// Formatting the offsets and discarding them is what made the rows
+/// unactionable in the first place; -1 means the row has no position.
+/// </param>
+public readonly record struct ResultRow(
+    string Kind, string Span, string Value, string Detail,
+    long StartSample = -1, long EndSample = -1);
 
 /// <summary>One entry in the task selector: a display title and how many of the
 /// loaded model's tasks it covers.</summary>

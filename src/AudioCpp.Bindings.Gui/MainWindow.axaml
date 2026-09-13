@@ -283,7 +283,9 @@
                            TextWrapping="Wrap" Height="300" FontSize="13" />
                 </TabItem>
                 <TabItem Header="Rows">
+                  <!-- Selecting a row seeks the preview to it. -->
                   <DataGrid ItemsSource="{Binding Rows}" IsReadOnly="True" Height="300"
+                            SelectedItem="{Binding SelectedRow}"
                             GridLinesVisibility="Horizontal">
                     <DataGrid.Columns>
                       <DataGridTextColumn Header="Kind"   Binding="{Binding Kind}"   Width="80" />
@@ -305,9 +307,14 @@
                 </TabItem>
               </TabControl>
 
-              <vm:WaveformView Height="90" Samples="{Binding OutputSamples}" />
+              <!-- Click or drag the waveform to seek; the cursor follows playback. -->
+              <vm:WaveformView Height="90" Samples="{Binding OutputSamples}"
+                               Progress="{Binding PlayProgress}"
+                               Seek="{Binding SeekTo}" />
               <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button Content="{Binding PlayLabel}" Command="{Binding PlayCommand}" MinWidth="76" />
                 <Button Content="Save WAV…" Command="{Binding SaveWavCommand}" />
+                <TextBlock Text="{Binding PlayStatus}" Classes="Subtle" VerticalAlignment="Center" />
                 <TextBlock Text="{Binding OutputSummary}" Classes="Subtle"
                            VerticalAlignment="Center" />
               </StackPanel>

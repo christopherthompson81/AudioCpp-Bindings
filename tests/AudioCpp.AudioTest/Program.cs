@@ -1,6 +1,6 @@
 using AudioCpp.Audio;
 
-namespace AudioCpp.CaptureTest;
+namespace AudioCpp.AudioTest;
 
 /// <summary>
 /// Exercises capture against whatever hardware is present. Needs a machine with
@@ -73,6 +73,88 @@ internal static class Program
         return failures;
     }
 
+    /// <summary>
+    /// Playback, pause and seek against a generated tone. The transport is
+    /// checkable headlessly because position lives in native code; only the
+    /// playhead *binding* needs a dispatcher, which is what --live-check covers.
+    /// </summary>
+    private static int PlaybackCheck()
+    {
+        Console.WriteLine("playback: tone, pause, seek");
+        var failures = 0;
+
+        const int rate = 16000;
+        var tone = new float[rate];
+        for (var i = 0; i < tone.Length; i++)
+        {
+            tone[i] = 0.25f * MathF.Sin(2f * MathF.PI * 440f * i / rate);
+        }
+
+        AudioPlayer player;
+        try { player = AudioPlayer.Open(tone, rate); }
+        catch (InvalidOperationException error)
+        {
+            // No output device is legitimate on a headless box.
+            Console.WriteLine($"  no output device ({error.Message}); skipping playback");
+            return 0;
+        }
+
+        using (player)
+        {
+            if (player.Length != rate)
+            {
+                Console.Error.WriteLine($"  length {player.Length} != {rate}");
+                failures++;
+            }
+
+            player.Play();
+            Thread.Sleep(300);
+            var advanced = player.Position;
+            if (advanced <= 0)
+            {
+                Console.Error.WriteLine("  position did not advance while playing");
+                failures++;
+            }
+
+            player.Pause();
+            Thread.Sleep(200);
+            if (player.Position != advanced)
+            {
+                Console.Error.WriteLine($"  paused playback advanced: {advanced} -> {player.Position}");
+                failures++;
+            }
+
+            player.Position = rate / 2;
+            if (player.Position != rate / 2)
+            {
+                Console.Error.WriteLine($"  seek landed at {player.Position}, wanted {rate / 2}");
+                failures++;
+            }
+
+            // Seeking past the end must clamp rather than run off the buffer.
+            player.Position = rate * 10;
+            if (player.Position != rate)
+            {
+                Console.Error.WriteLine($"  seek past the end gave {player.Position}, wanted {rate}");
+                failures++;
+            }
+
+            // Playing from the end restarts rather than sitting silent.
+            player.Play();
+            Thread.Sleep(150);
+            if (player.Position >= rate)
+            {
+                Console.Error.WriteLine("  play at the end did not restart");
+                failures++;
+            }
+
+            Console.WriteLine($"  advanced to {advanced}, seek and clamp behaved");
+        }
+
+        Console.WriteLine(failures == 0 ? "playback OK" : $"playback: {failures} failure(s)");
+        return failures;
+    }
+
     private static int Main(string[] args)
     {
         int backendOk;
@@ -83,8 +165,8 @@ internal static class Program
         }
         catch (DllNotFoundException)
         {
-            Console.WriteLine("libaudiocapture not found; skipping.");
-            Console.WriteLine("Build native/audiocapture, or set AUDIOCAPTURE_NATIVE_DIR.");
+            Console.WriteLine("libaudioio not found; skipping.");
+            Console.WriteLine("Build native/audioio, or set AUDIOIO_NATIVE_DIR.");
             return 77;
         }
 
@@ -156,6 +238,7 @@ internal static class Program
         // thread, so those paths must survive overlapping. Without the gate
         // this hands a freed handle to the native side.
         failures += ConcurrencyCheck();
+        failures += PlaybackCheck();
 
         if (failures > 0) { Console.Error.WriteLine($"{failures} problem(s)"); return 1; }
         Console.WriteLine("capture OK");

@@ -16,6 +16,68 @@ namespace AudioCpp.Bindings.Gui;
 /// </remarks>
 internal static class LiveCheck
 {
+    /// <summary>
+    /// Drive the preview player. Like the meter, the playhead is advanced by a
+    /// dispatcher timer, so a headless run would show it frozen at zero while
+    /// audio plays perfectly.
+    /// </summary>
+    private static async Task<int> PlayCheckAsync(MainWindowViewModel viewModel)
+    {
+        var failures = 0;
+
+        if (!viewModel.HasPreviewAudio)
+        {
+            Console.Error.WriteLine("nothing to preview; load a clip first");
+            return 1;
+        }
+
+        await viewModel.PlayCommand.ExecuteAsync();
+        Console.WriteLine($"playing: {viewModel.PlayLabel}");
+
+        await Task.Delay(700);
+        var moved = viewModel.PlayProgress;
+        Console.WriteLine($"progress after 0.7s: {moved:F4}  ({viewModel.PlayStatus})");
+        if (moved <= 0) { Console.Error.WriteLine("playhead never advanced"); failures++; }
+
+        await viewModel.PlayCommand.ExecuteAsync();   // pause
+        await Task.Delay(300);
+        var held = viewModel.PlayProgress;
+        Console.WriteLine($"progress after pausing 0.3s: {held:F4}");
+        if (Math.Abs(held - moved) > 0.02) { Console.Error.WriteLine("paused playback kept advancing"); failures++; }
+
+        viewModel.SeekTo(0.75);
+        await Task.Delay(50);
+        Console.WriteLine($"after seeking to 0.75: {viewModel.PlayProgress:F4}");
+        if (Math.Abs(viewModel.PlayProgress - 0.75) > 0.05)
+        {
+            Console.Error.WriteLine("seek did not land");
+            failures++;
+        }
+
+        // Selecting a result row should seek the preview to it -- the whole
+        // reason the rows carry sample offsets.
+        var positioned = viewModel.Rows.FirstOrDefault(r => r.StartSample > 0);
+        if (positioned.StartSample > 0)
+        {
+            viewModel.SelectedRow = positioned;
+            await Task.Delay(50);
+            var expected = positioned.StartSample / (double)16000;
+            Console.WriteLine($"row seek: wanted {expected:F2}s, playhead at {viewModel.PlayStatus}");
+            if (viewModel.PlayProgress <= 0)
+            {
+                Console.Error.WriteLine("selecting a row did not move the playhead");
+                failures++;
+            }
+        }
+        else
+        {
+            Console.WriteLine("row seek: no positioned rows in this result, skipped");
+        }
+
+        await viewModel.StopAudioAsync();
+        return failures;
+    }
+
     internal static void Arm(MainWindowViewModel viewModel, string[] args, int seconds)
     {
         _ = Dispatcher.UIThread.InvokeAsync(async () =>
@@ -35,7 +97,23 @@ internal static class LiveCheck
                             viewModel.CaptureDevice = viewModel.CaptureDevices
                                 .FirstOrDefault(d => d.Index == int.Parse(parts[1]));
                             break;
+                        case "audio": viewModel.AudioPath = parts[1]; break;
                     }
+                }
+
+                if (args.Contains("--play-check"))
+                {
+                    // Load and run once so there is audio to preview: the input
+                    // clip is captured during a run.
+                    await viewModel.LoadCommand.ExecuteAsync();
+                    Console.WriteLine($"load: {viewModel.Status}");
+                    await viewModel.RunCommand.ExecuteAsync();
+                    Console.WriteLine($"run: {viewModel.Status}");
+
+                    failures += await PlayCheckAsync(viewModel);
+                    Console.WriteLine(failures == 0 ? "play check OK" : $"play check: {failures} failure(s)");
+                    Environment.Exit(failures == 0 ? 0 : 1);
+                    return;
                 }
 
                 await viewModel.LoadCommand.ExecuteAsync();

@@ -26,7 +26,7 @@ public partial class MainWindow : Window
     /// </summary>
     protected override async void OnClosing(WindowClosingEventArgs e)
     {
-        if (DataContext is MainWindowViewModel viewModel) await viewModel.StopRecordingAsync();
+        if (DataContext is MainWindowViewModel viewModel) await viewModel.StopAudioAsync();
         base.OnClosing(e);
     }
 

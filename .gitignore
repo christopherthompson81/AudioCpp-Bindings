@@ -8,4 +8,4 @@ obj/
 # developed against come from a licensed corpus; transcripts of it are derivative.
 *.wav
 tools/perf/reference/*.txt
-native/audiocapture/build/
+native/audioio/build/

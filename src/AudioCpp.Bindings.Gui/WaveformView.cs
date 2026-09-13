@@ -1,16 +1,31 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 
 namespace AudioCpp.Bindings.Gui;
 
-/// <summary>A min/max envelope of generated audio. Enough to see that a run produced sound.</summary>
+/// <summary>
+/// A min/max envelope of audio, with a playhead and click-to-seek.
+/// </summary>
+/// <remarks>
+/// Colours come from the theme rather than the literals this started with, so
+/// the control follows a light/dark switch like everything else.
+/// </remarks>
 public sealed class WaveformView : Control
 {
     public static readonly StyledProperty<float[]> SamplesProperty =
         AvaloniaProperty.Register<WaveformView, float[]>(nameof(Samples), []);
 
-    static WaveformView() => AffectsRender<WaveformView>(SamplesProperty);
+    /// <summary>Playhead as a fraction 0..1, or negative to hide it.</summary>
+    public static readonly StyledProperty<double> ProgressProperty =
+        AvaloniaProperty.Register<WaveformView, double>(nameof(Progress), -1);
+
+    /// <summary>Raised with a fraction 0..1 when the user clicks or drags.</summary>
+    public static readonly StyledProperty<Action<double>?> SeekProperty =
+        AvaloniaProperty.Register<WaveformView, Action<double>?>(nameof(Seek));
+
+    static WaveformView() => AffectsRender<WaveformView>(SamplesProperty, ProgressProperty);
 
     public float[] Samples
     {
@@ -18,21 +33,62 @@ public sealed class WaveformView : Control
         set => SetValue(SamplesProperty, value);
     }
 
+    public double Progress
+    {
+        get => GetValue(ProgressProperty);
+        set => SetValue(ProgressProperty, value);
+    }
+
+    public Action<double>? Seek
+    {
+        get => GetValue(SeekProperty);
+        set => SetValue(SeekProperty, value);
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        SeekTo(e.GetPosition(this).X);
+        e.Pointer.Capture(this);
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        if (Equals(e.Pointer.Captured, this)) SeekTo(e.GetPosition(this).X);
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        e.Pointer.Capture(null);
+    }
+
+    private void SeekTo(double x)
+    {
+        if (Samples.Length == 0 || Bounds.Width <= 0) return;
+        Seek?.Invoke(Math.Clamp(x / Bounds.Width, 0, 1));
+    }
+
+    private IBrush Brush(string key, Color fallback) =>
+        this.TryFindResource(key, out var found) && found is IBrush brush
+            ? brush : new SolidColorBrush(fallback);
+
     public override void Render(DrawingContext context)
     {
         var width = Bounds.Width;
         var height = Bounds.Height;
         if (width <= 0 || height <= 0) return;
 
-        context.FillRectangle(new SolidColorBrush(Color.FromRgb(0x1e, 0x1e, 0x24)), new Rect(0, 0, width, height));
+        context.FillRectangle(Brush("AppCode", Color.FromRgb(0x07, 0x12, 0x20)), new Rect(0, 0, width, height));
 
-        var midline = new Pen(new SolidColorBrush(Color.FromRgb(0x3a, 0x3a, 0x44)));
+        var midline = new Pen(Brush("AppLine", Color.FromRgb(0x23, 0x36, 0x52)));
         context.DrawLine(midline, new Point(0, height / 2), new Point(width, height / 2));
 
         var samples = Samples;
         if (samples.Length == 0) return;
 
-        var pen = new Pen(new SolidColorBrush(Color.FromRgb(0x6c, 0xc6, 0x9a)), 1);
+        var pen = new Pen(Brush("AppAccent", Color.FromRgb(0x42, 0xe8, 0xd5)), 1);
         var columns = (int)Math.Min(width, 4000);
         var perColumn = Math.Max(1, samples.Length / Math.Max(columns, 1));
 
@@ -53,6 +109,16 @@ public sealed class WaveformView : Control
             var top = height / 2 - high * height / 2;
             var bottom = height / 2 - low * height / 2;
             context.DrawLine(pen, new Point(x, top), new Point(x, bottom));
+        }
+
+        var progress = Progress;
+        if (progress >= 0)
+        {
+            var cursorX = Math.Clamp(progress, 0, 1) * width;
+            // Drawn over the envelope, and in the danger colour so it reads as a
+            // position rather than another waveform.
+            context.DrawLine(new Pen(Brush("AppDanger", Color.FromRgb(0xff, 0x77, 0x8b)), 1.5),
+                             new Point(cursorX, 0), new Point(cursorX, height));
         }
     }
 }
