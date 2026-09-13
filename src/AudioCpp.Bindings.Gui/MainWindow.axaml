@@ -24,11 +24,17 @@
           </StackPanel>
         </StackPanel>
 
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4"
-                    VerticalAlignment="Center">
-          <TextBlock Text="Studio" Classes="Label" Margin="12,0"
-                     Foreground="{DynamicResource AppTextStrong}" />
-        </StackPanel>
+        <!-- Horizontal explicitly: the Chips class panels with a WrapPanel for
+             the task row, which stacks these two and doubles the bar's height. -->
+        <ListBox Grid.Column="2" Classes="Chips" ItemsSource="{Binding Pages}"
+                 SelectedItem="{Binding Page}" Background="Transparent"
+                 BorderThickness="0" Padding="0" VerticalAlignment="Center">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" />
+            </ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+        </ListBox>
 
         <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="14"
                     VerticalAlignment="Center">
@@ -55,7 +61,103 @@
       </DockPanel>
     </Border>
 
-    <ScrollViewer Padding="20,16">
+    <ScrollViewer Padding="20,16" IsVisible="{Binding IsArena}">
+      <StackPanel Spacing="16" DataContext="{Binding Arena}">
+        <StackPanel Spacing="4">
+          <TextBlock Text="COMPARE" Classes="Eyebrow" Foreground="{DynamicResource AppAccent}" />
+          <TextBlock Text="Arena" Classes="Hero" />
+          <TextBlock Classes="Subtle" FontSize="13"
+                     Text="Two configurations, one input. Which quantisation, backend or family is good enough to use." />
+        </StackPanel>
+
+        <Grid ColumnDefinitions="*,16,*">
+          <Border Grid.Column="0" Classes="Card" VerticalAlignment="Top">
+            <StackPanel Spacing="9" DataContext="{Binding Left}">
+              <TextBlock Text="SIDE A" Classes="Eyebrow" />
+              <TextBox Text="{Binding ModelPath}" PlaceholderText="path to a .gguf or directory" />
+              <TextBox Text="{Binding FamilyHint}" PlaceholderText="family hint (optional)" />
+              <Grid ColumnDefinitions="*,8,*">
+                <ComboBox Grid.Column="0" ItemsSource="{Binding Backends}"
+                          SelectedItem="{Binding Backend}" HorizontalAlignment="Stretch" />
+                <NumericUpDown Grid.Column="2" Value="{Binding Threads}" Minimum="1" Maximum="128"
+                               Increment="1" FormatString="0" />
+              </Grid>
+              <TextBlock Text="{Binding Status}" Classes="Subtle" FontSize="11" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Timing}" Classes="Subtle" FontSize="11" />
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button Content="Unload"
+                        Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).UnloadLeftCommand}" />
+                <Button Content="Play"
+                        Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).PlayLeftCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <Border Grid.Column="2" Classes="Card" VerticalAlignment="Top">
+            <StackPanel Spacing="9" DataContext="{Binding Right}">
+              <TextBlock Text="SIDE B" Classes="Eyebrow" />
+              <TextBox Text="{Binding ModelPath}" PlaceholderText="path to a .gguf or directory" />
+              <TextBox Text="{Binding FamilyHint}" PlaceholderText="family hint (optional)" />
+              <Grid ColumnDefinitions="*,8,*">
+                <ComboBox Grid.Column="0" ItemsSource="{Binding Backends}"
+                          SelectedItem="{Binding Backend}" HorizontalAlignment="Stretch" />
+                <NumericUpDown Grid.Column="2" Value="{Binding Threads}" Minimum="1" Maximum="128"
+                               Increment="1" FormatString="0" />
+              </Grid>
+              <TextBlock Text="{Binding Status}" Classes="Subtle" FontSize="11" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Timing}" Classes="Subtle" FontSize="11" />
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button Content="Unload"
+                        Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).UnloadRightCommand}" />
+                <Button Content="Play"
+                        Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).PlayRightCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </Grid>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Text="INPUT" Classes="Eyebrow" />
+            <Grid ColumnDefinitions="Auto,10,*">
+              <ComboBox Grid.Column="0" ItemsSource="{Binding Tasks}" SelectedItem="{Binding Task}" />
+              <TextBox Grid.Column="2" Text="{Binding AudioPath}" PlaceholderText="input WAV" />
+            </Grid>
+            <TextBox Text="{Binding Text}" PlaceholderText="text, for tts" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Load A" Command="{Binding LoadLeftCommand}" />
+              <Button Content="Load B" Command="{Binding LoadRightCommand}" />
+              <Button Classes="Primary" Content="Compare" Command="{Binding CompareCommand}" />
+              <TextBlock Text="{Binding Status}" Classes="Subtle" VerticalAlignment="Center" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Text="RESULT" Classes="Eyebrow" />
+            <TextBlock Text="{Binding Summary}" Classes="Title" FontSize="15" />
+            <TextBlock Classes="Subtle" FontSize="11"
+                       Text="Grey where both agree, orange for A only, blue for B only." />
+            <ScrollViewer Height="260">
+              <ItemsControl ItemsSource="{Binding Diff}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:DiffPiece">
+                    <TextBlock Text="{Binding Text}" Foreground="{Binding Brush}"
+                               Margin="0,0,5,2" ToolTip.Tip="{Binding Side}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+
+    <ScrollViewer Padding="20,16" IsVisible="{Binding IsStudio}">
       <StackPanel Spacing="16">
 
         <!-- Task chips. The engine decides what a family supports; these mirror
