@@ -3,3 +3,8 @@ obj/
 *.user
 .vs/
 .idea/
+
+# No audio or reference transcripts are tracked. The recordings these harnesses were
+# developed against come from a licensed corpus; transcripts of it are derivative.
+*.wav
+tools/perf/reference/*.txt
