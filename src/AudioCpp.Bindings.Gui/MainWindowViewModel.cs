@@ -393,7 +393,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// Something to play: generated output, or the loaded input clip. Output
     /// wins, since after a TTS run that is what the user just made.
     /// </summary>
-    public bool HasPreviewAudio => _outputSamples is { Length: > 0 } || _inputClip is not null;
+    public bool HasPreviewAudio =>
+        _previewStream is not null || _outputSamples is { Length: > 0 } || _inputClip is not null;
 
     public string PlayLabel => _player?.IsPlaying == true
         ? Resources.Strings.Pause : Resources.Strings.Play;
@@ -831,6 +832,26 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
     public ObservableCollection<ResultRow> Rows { get; } = [];
 
+    private int _resultTab;
+
+    /// <summary>
+    /// Which result tab is open.
+    /// </summary>
+    /// <remarks>
+    /// Transcript is first and is empty for anything that does not produce
+    /// text, so a separation finished on a blank panel with its two stems one
+    /// unmarked click away. Indices are the TabItem order: transcript, rows,
+    /// streams, artifacts, json, model.
+    /// </remarks>
+    public int ResultTab { get => _resultTab; set => Set(ref _resultTab, value); }
+
+    private void SelectResultTab() =>
+        ResultTab = Transcript.Length > 0 ? 0
+            : OutputStreams.Count > 0 ? 2
+            : Artifacts.Count > 0 ? 3
+            : Rows.Count > 0 ? 1
+            : 0;
+
     public string ModelPath
     {
         get => _modelPath;
@@ -979,7 +1000,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var result = _resultsByTask.GetValueOrDefault(task, TaskResult.Empty);
 
         // The player holds a device open on the outgoing task's audio, so it
-        // has to go before the samples it is playing are replaced.
+        // has to go before the samples it is playing are replaced. The stem it
+        // was previewing belongs to the outgoing task too.
+        _previewStream = null;
         ResetPlayer();
 
         Transcript = result.Transcript;
@@ -1008,8 +1031,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _segments.Clear();
         _segments.AddRange(result.Segments);
 
+        SelectResultTab();
         Notify(nameof(OutputSamples));
         Notify(nameof(OutputSummary));
+        Notify(nameof(PreviewLabel));
         Notify(nameof(Timing));
         Notify(nameof(RunState));
         Notify(nameof(HasWordTimings));
@@ -1371,13 +1396,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 // directory, neither of which is where an installed package
                 // lives.
                 //
-                // Matching on the message is the only signal -- both failures
-                // return the same status. If upstream rewords it the fallback
-                // stops firing and the user sees that same message, which names
-                // --model-spec-override, so the failure explains itself.
+                // Matched on the engine recommending the override rather than on
+                // one phrasing of the problem. There are at least two:
+                //
+                //   model spec not found for family 'x' (provide --model-spec-override, ...)
+                //   GGUF has no embedded model spec for family 'x': ...; install
+                //     model_specs/x.json next to it, or pass --model-spec-override
+                //
+                // Matching the first phrase alone missed the second, which is how
+                // a GGUF with no embedded spec -- bs_roformer ships one -- stopped
+                // loading. Both messages name the flag, so that is the signal.
                 catch (AudioCppException missingSpec)
                     when (_modelSpecs is not null
-                          && missingSpec.Detail.Contains("model spec not found",
+                          && missingSpec.Detail.Contains("--model-spec-override",
                                                          StringComparison.Ordinal))
                 {
                     // Whatever this throws got further than the first attempt,
@@ -1475,6 +1506,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Artifacts.Clear();
         TimingBreakdown = "";
         _outputSamples = null;
+        _previewStream = null;
         ResetPlayer();
         _cancel = new CancellationTokenSource();
         // Whether this run can be stopped at all is decided by its shape, and
@@ -1697,8 +1729,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             ResultJson = BuildResultJson(rows, transcript);
             Transcript = transcript;
             foreach (var row in rows) Rows.Add(row);
+            SelectResultTab();
             Notify(nameof(OutputSamples));
             Notify(nameof(OutputSummary));
+            Notify(nameof(PreviewLabel));
             Notify(nameof(Timing));
             // Cancelled first: a run stopped before its first piece finished
             // produces nothing, and "the family produced no output for this
@@ -2197,9 +2231,46 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         await System.Threading.Tasks.Task.CompletedTask;
     }
 
+    private NamedAudioEntry? _previewStream;
+
+    /// <summary>
+    /// What the transport is playing.
+    /// </summary>
+    /// <remarks>
+    /// Separation returns a buffer per stem and no single output, so Play fell
+    /// through to the input clip -- useful for comparing, but silent about what
+    /// you were hearing. Saying so costs a line and removes the guess.
+    /// </remarks>
+    public string PreviewLabel =>
+        _previewStream is { } stream ? $"Previewing {stream.Id}"
+        : _outputSamples is { Length: > 0 } ? "Previewing the result"
+        : _inputClip is not null ? "Previewing the input"
+        : "";
+
+    /// <summary>
+    /// Preview one separated stem.
+    /// </summary>
+    /// <remarks>
+    /// The rows choose what the transport plays rather than carrying their own
+    /// one; the playhead, the waveform and the Save button then all refer to
+    /// the same thing, which two independent players could not manage.
+    /// </remarks>
+    public async Task PlayStreamAsync(NamedAudioEntry stream)
+    {
+        var same = _previewStream?.Id == stream.Id;
+        _previewStream = stream;
+        if (!same) ResetPlayer();
+        Notify(nameof(PreviewLabel));
+        Notify(nameof(HasPreviewAudio));
+        PlayCommand.RaiseCanExecuteChanged();
+        await TogglePlaybackAsync();
+    }
+
     private bool TryOpenPlayer()
     {
-        var clip = _outputSamples is { Length: > 0 }
+        var clip = _previewStream is { } stream
+            ? (stream.Samples, stream.SampleRate, stream.Channels)
+            : _outputSamples is { Length: > 0 }
             ? (_outputSamples, _outputSampleRate, _outputChannels)
             : _inputClip;
         if (clip is null) return false;
