@@ -131,6 +131,46 @@
     <Setter Property="Padding" Value="10,6" />
   </Style>
 
+  <!-- The suggestion list is a popup, and popups do not pick up the card and
+       control brushes the rest of the window uses, so it arrives in the theme's
+       default colours — light panel, dark text, inside a dark window. Named
+       template parts rather than a whole template: the behaviour is Fluent's,
+       only the colours are ours. -->
+  <Style Selector="AutoCompleteBox">
+    <Setter Property="Background" Value="{DynamicResource AppControl}" />
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppControlBorder}" />
+    <Setter Property="CornerRadius" Value="7" />
+  </Style>
+  <!-- The popup takes its width from its content, and a package title long
+       enough to overflow pushed the whole list out from under the box and off
+       the left of the window. Capped at the box's width; long titles wrap. -->
+  <Style Selector="AutoCompleteBox /template/ Popup#PART_Popup">
+    <Setter Property="MaxWidth" Value="{Binding $parent[AutoCompleteBox].Bounds.Width}" />
+  </Style>
+  <Style Selector="AutoCompleteBox /template/ Border#PART_SuggestionsContainer">
+    <Setter Property="Background" Value="{DynamicResource AppCard}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource AppLine}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="7" />
+  </Style>
+  <Style Selector="AutoCompleteBox /template/ ListBox#PART_SelectingItemsControl">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+  </Style>
+  <Style Selector="AutoCompleteBox /template/ ListBox#PART_SelectingItemsControl ListBoxItem">
+    <Setter Property="Foreground" Value="{DynamicResource AppText}" />
+    <Setter Property="Padding" Value="10,6" />
+  </Style>
+  <Style Selector="AutoCompleteBox /template/ ListBox#PART_SelectingItemsControl ListBoxItem:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AppActiveBg}" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource AppTextStrong}" />
+  </Style>
+  <Style Selector="AutoCompleteBox /template/ ListBox#PART_SelectingItemsControl ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AppActiveBg}" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource AppTextStrong}" />
+  </Style>
+
   <Style Selector="NumericUpDown">
     <Setter Property="Background" Value="{DynamicResource AppControl}" />
     <Setter Property="Foreground" Value="{DynamicResource AppText}" />

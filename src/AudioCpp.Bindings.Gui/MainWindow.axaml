@@ -266,19 +266,28 @@
 
               <!-- The package picker the reference UI leads with. Falls back to
                    the path box below, which still takes anything on disk. -->
-              <ComboBox ItemsSource="{Binding CatalogEntries}"
-                        SelectedItem="{Binding SelectedEntry}"
-                        HorizontalAlignment="Stretch"
-                        PlaceholderText="choose a package…">
-                <ComboBox.ItemTemplate>
+              <!-- An AutoCompleteBox rather than a ComboBox: 235 packages across
+                   77 families is not a list anyone scrolls. MinimumPrefixLength
+                   is 0 so an empty box still drops down the whole list, which is
+                   the browsing the ComboBox was good at. -->
+              <AutoCompleteBox ItemsSource="{Binding CatalogEntries}"
+                               SelectedItem="{Binding SelectedEntry}"
+                               ItemFilter="{Binding EntryFilter}"
+                               ValueMemberBinding="{Binding Title}"
+                               MinimumPrefixLength="0"
+                               MaxDropDownHeight="360"
+                               HorizontalAlignment="Stretch"
+                               PlaceholderText="choose a package…">
+                <AutoCompleteBox.ItemTemplate>
                   <DataTemplate x:DataType="vm:CatalogEntry">
                     <StackPanel>
-                      <TextBlock Text="{Binding Title}" />
-                      <TextBlock Text="{Binding Subtitle}" Classes="Subtle" FontSize="11" />
+                      <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding Subtitle}" Classes="Subtle" FontSize="11"
+                                 TextWrapping="Wrap" />
                     </StackPanel>
                   </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
+                </AutoCompleteBox.ItemTemplate>
+              </AutoCompleteBox>
 
               <Border Background="{DynamicResource AppChip}"
                       BorderBrush="{DynamicResource AppLine}" BorderThickness="1"

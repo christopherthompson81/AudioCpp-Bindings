@@ -432,6 +432,34 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// Picking a package fills in the path and family, which is the whole point:
     /// the reference UI is a dropdown where this app had a path box.
     /// </summary>
+    /// <summary>
+    /// Whether a package matches what has been typed into the picker.
+    /// </summary>
+    /// <remarks>
+    /// Every word has to match, in any order, anywhere in the title or the
+    /// family/format/precision line. That is what makes "parakeet q8" work
+    /// without knowing whether the precision comes before or after the name in
+    /// the title, which differs between families.
+    ///
+    /// Static so the matching can be checked without a window; the control only
+    /// supplies the strings.
+    /// </remarks>
+    internal static bool Matches(CatalogEntry entry, string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search)) return true;
+
+        var haystack = $"{entry.Title} {entry.Subtitle}";
+        foreach (var word in search.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!haystack.Contains(word, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+        return true;
+    }
+
+    /// <summary>Type-ahead filter for the package picker.</summary>
+    public Avalonia.Controls.AutoCompleteFilterPredicate<object?> EntryFilter { get; } =
+        (search, item) => item is CatalogEntry entry && Matches(entry, search);
+
     public CatalogEntry? SelectedEntry
     {
         get => _selectedEntry;
