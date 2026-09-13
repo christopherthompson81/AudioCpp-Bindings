@@ -17,15 +17,24 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private AudioCppModel? _model;
     private AudioCppSession? _session;
     private string _sessionKey = "";
+    private AudioCppModel? _vadModel;
+    private AudioCppSession? _vadSession;
+    private string _vadSessionKey = "";
 
     private string _modelPath = "";
     private string _familyHint = "";
     private string _backend = "cpu";
-    private int _threads = Environment.ProcessorCount;
+    private int _threads = PhysicalCoreCount();
+    private bool _useBuiltInChunking = true;
+    private double _chunkSeconds = 10;
+    private string _vadAssetPath = "";
     private string _task = "asr";
     private string _audioPath = "";
     private string _text = "The quick brown fox jumps over the lazy dog.";
     private string _voiceId = "";
+    private string _vadModelPath = "";
+    private double _minSegmentSpan = 15;
+    private double _maxSegmentSpan = 28;
     private string _status = "Pick a model file or directory, then Load.";
     private bool _busy;
     private bool _isLoaded;
@@ -35,6 +44,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private int _outputSampleRate;
     private int _outputChannels = 1;
     private double _lastRunSeconds;
+    private string _segmentedSummary = "";
 
     public MainWindowViewModel()
     {
@@ -69,8 +79,53 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public string FamilyHint { get => _familyHint; set => Set(ref _familyHint, value); }
     public string Backend { get => _backend; set => Set(ref _backend, value); }
     public int Threads { get => _threads; set => Set(ref _threads, value); }
+
+    /// <summary>Let the engine segment on speech rather than handing it the whole clip.</summary>
+    public bool UseBuiltInChunking
+    {
+        get => _useBuiltInChunking;
+        set { if (Set(ref _useBuiltInChunking, value)) Notify(nameof(ChunkingApplies)); }
+    }
+
+    /// <summary>
+    /// Whether the chunking controls can do anything: the preset only engages past
+    /// <see cref="FullContextCeilingSeconds"/>, and a VAD model set above means this app
+    /// segments instead. Without this the window offers a toggle that silently does
+    /// nothing on a short clip.
+    /// </summary>
+    public bool ChunkingApplies => _useBuiltInChunking && !HasVadModel;
+
+    /// <summary>Seconds per chunk. The engine's own default of 2 slices mid-utterance.</summary>
+    public double ChunkSeconds { get => _chunkSeconds; set => Set(ref _chunkSeconds, value); }
+
+    /// <summary>Directory holding silero_vad_16k.safetensors; blank means go looking.</summary>
+    public string VadAssetPath { get => _vadAssetPath; set => Set(ref _vadAssetPath, value); }
     public string Task { get => _task; set => Set(ref _task, value); }
     public string AudioPath { get => _audioPath; set => Set(ref _audioPath, value); }
+
+    /// <summary>
+    /// Optional Silero VAD model. When set, ASR runs segment-by-segment instead of
+    /// handing the whole clip to the model at once.
+    /// </summary>
+    public string VadModelPath
+    {
+        get => _vadModelPath;
+        set
+        {
+            if (!Set(ref _vadModelPath, value)) return;
+            Notify(nameof(HasVadModel));
+            Notify(nameof(ChunkingApplies));
+        }
+    }
+
+    /// <summary>The group-span controls only mean anything once a VAD model is set.</summary>
+    public bool HasVadModel => _vadModelPath.Length > 0;
+
+    /// <summary>Minimum seconds of speech to accumulate before transcribing a group.</summary>
+    public double MinSegmentSpan { get => _minSegmentSpan; set => Set(ref _minSegmentSpan, value); }
+
+    /// <summary>Ceiling on a group, so one unbroken stretch cannot become a huge graph.</summary>
+    public double MaxSegmentSpan { get => _maxSegmentSpan; set => Set(ref _maxSegmentSpan, value); }
     public string Text { get => _text; set => Set(ref _text, value); }
     public string VoiceId { get => _voiceId; set => Set(ref _voiceId, value); }
     public string Status { get => _status; set => Set(ref _status, value); }
@@ -102,7 +157,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             }
             catch (Exception exception)
             {
-                return $"libaudiocpp not loaded: {exception.Message}";
+                // Describe(), not exception.Message -- the runtime's own text for a
+                // missing native library is a twenty-line list of every path it probed,
+                // which fills the status box and says nothing the user can act on.
+                return Describe(exception);
             }
         }
     }
@@ -138,15 +196,24 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             await System.Threading.Tasks.Task.Run(() =>
             {
                 // Freed in reverse, though the ABI keeps parents alive so order is free.
+                _vadSession?.Dispose();
+                _vadModel?.Dispose();
                 _session?.Dispose();
                 _model?.Dispose();
                 _registry?.Dispose();
+                _vadSession = null;
+                _vadModel = null;
+                _vadSessionKey = "";
                 _session = null;
                 _sessionKey = "";
 
                 _registry = AudioCppRegistry.Create();
                 _model = _registry.Load(ModelPath,
                     new ModelConfig(FamilyHint.Length > 0 ? FamilyHint : null));
+                if (VadModelPath.Length > 0)
+                {
+                    _vadModel = _registry.Load(VadModelPath, "silero_vad");
+                }
             });
 
             var model = _model!;
@@ -174,7 +241,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
             if (supported.Count > 0 && !supported.Contains(Task)) Task = supported[0];
             IsLoaded = true;
-            Status = $"Loaded {model.Family} — {Options.Count} declared option(s), read from the model.";
+            Status = $"Loaded {model.Family} — {Options.Count} declared option(s), read from the model."
+                   + (_vadModel is not null ? $"  VAD: {_vadModel.Family}." : "");
         }
         catch (Exception exception)
         {
@@ -205,16 +273,56 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
             await System.Threading.Tasks.Task.Run(() =>
             {
+                // Read the audio before the session is built: how long the clip is decides
+                // whether the chunking preset applies, and the preset carries session
+                // options, which have to be settled before CreateSession.
+                (float[] Samples, int SampleRate, int Channels)? clip = null;
+                if (Task != "tts")
+                {
+                    if (AudioPath.Length == 0)
+                        throw new InvalidOperationException("Select a WAV file first.");
+                    clip = Wav.Read(AudioPath);
+                }
+
                 // One session per task/backend/threads combination, reused across runs.
-                var key = $"{Task}|{Backend}|{Threads}";
+                var sessionOptions = Options
+                    .Where(o => o.Scope == nameof(AudioCppOptionScope.Session) && o.Value.Length > 0)
+                    .Select(o => new KeyValuePair<string, string>(o.Name, o.Value))
+                    .ToList();
+
+                var seconds = clip is { } c && c.SampleRate > 0
+                    ? (double)c.Samples.Length / c.Channels / c.SampleRate
+                    : 0;
+                var chunking = ChunkingPreset(seconds);
+                foreach (var option in chunking.Session)
+                {
+                    if (!sessionOptions.Any(o => o.Key == option.Key)) sessionOptions.Add(option);
+                }
+
+                // Option values are part of the session's identity: a session is built
+                // with them, so changing one has to rebuild it or the edit silently
+                // does nothing.
+                var key = $"{Task}|{Backend}|{Threads}|"
+                        + string.Join(";", sessionOptions.Select(o => $"{o.Key}={o.Value}"));
                 if (_session is null || _sessionKey != key)
                 {
                     _session?.Dispose();
-                    _session = _model!.CreateSession(Task, "offline", new BackendConfig(Backend, 0, Threads));
+                    _session = _model!.CreateSession(
+                        Task, "offline", new BackendConfig(Backend, 0, Threads),
+                        sessionOptions.Count > 0 ? sessionOptions : null);
                     _sessionKey = key;
                 }
 
                 using var request = new AudioCppRequest();
+                foreach (var option in chunking.Request)
+                {
+                    request.SetOption(option.Key, option.Value);
+                }
+                foreach (var option in Options.Where(o =>
+                             o.Scope == nameof(AudioCppOptionScope.Request) && o.Value.Length > 0))
+                {
+                    request.SetOption(option.Name, option.Value);   // an explicit edit wins
+                }
                 if (Task == "tts")
                 {
                     request.SetText(Text, "en-us");
@@ -222,9 +330,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 }
                 else
                 {
-                    if (AudioPath.Length == 0) throw new InvalidOperationException("Select a WAV file first.");
-                    var clip = Wav.Read(AudioPath);
-                    request.SetAudio(clip.Samples, clip.SampleRate, clip.Channels);
+                    var input = clip!.Value;
+                    if (_vadModel is not null)
+                    {
+                        // Segment first, transcribe each stretch of speech separately.
+                        // Handing a long recording to the model whole means one encoder
+                        // graph over the entire clip, which is both the slower path and
+                        // the one that runs out of memory on anything lengthy.
+                        transcript = RunSegmented(input, rows);
+                        return;
+                    }
+                    request.SetAudio(input.Samples, input.SampleRate, input.Channels);
                 }
 
                 using var result = _session!.Run(request);
@@ -274,7 +390,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(Timing));
             Status = rows.Count == 0 && transcript.Length == 0 && _outputSamples is null
                 ? "Ran, but the family produced no output for this input."
-                : $"Done in {_lastRunSeconds * 1000:F0} ms.";
+                : _segmentedSummary.Length > 0
+                    ? $"{_segmentedSummary}  Done in {_lastRunSeconds * 1000:F0} ms."
+                    : $"Done in {_lastRunSeconds * 1000:F0} ms.";
         }
         catch (Exception exception)
         {
@@ -285,6 +403,106 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Busy = false;
             SaveWavCommand.RaiseCanExecuteChanged();
         }
+    }
+
+    /// <summary>
+    /// Silero VAD, then ASR over each group of speech. Groups accumulate adjacent
+    /// segments until they clear <see cref="MinSegmentSpan"/> -- a couple of words on
+    /// their own transcribe badly, the model wants context -- and are split at
+    /// <see cref="MaxSegmentSpan"/> so one unbroken stretch cannot build a huge graph.
+    /// Word timings come back relative to each window and are shifted to absolute here.
+    /// </summary>
+    private string RunSegmented(
+        (float[] Samples, int SampleRate, int Channels) clip,
+        List<ResultRow> rows)
+    {
+        if (clip.Channels != 1)
+            throw new InvalidOperationException($"VAD needs mono audio, got {clip.Channels} channels.");
+
+        _segmentedSummary = "";
+        var rate = clip.SampleRate;
+        var vadKey = $"{Backend}|{Threads}";
+        if (_vadSession is null || _vadSessionKey != vadKey)
+        {
+            _vadSession?.Dispose();
+            _vadSession = _vadModel!.CreateSession("vad", "offline", new BackendConfig(Backend, 0, Threads));
+            _vadSessionKey = vadKey;
+        }
+
+        List<(long Start, long End)> segments;
+        using (var vadRequest = new AudioCppRequest())
+        {
+            vadRequest.SetAudio(clip.Samples, rate, 1);
+            using var vadResult = _vadSession!.Run(vadRequest);
+            segments = vadResult.Segments.Select(s => (s.StartSample, s.EndSample)).ToList();
+        }
+
+        var groups = GroupSegments(segments, rate, MinSegmentSpan, MaxSegmentSpan, clip.Samples.Length);
+        if (groups.Count == 0)
+        {
+            _segmentedSummary = "VAD found no speech in this file.";
+            return "";
+        }
+
+        var pieces = new List<string>();
+        foreach (var (start, end) in groups)
+        {
+            var window = new float[end - start];
+            Array.Copy(clip.Samples, (int)start, window, 0, window.Length);
+
+            using var request = new AudioCppRequest();
+            request.SetAudio(window, rate, 1);
+            foreach (var option in Options.Where(o =>
+                         o.Scope == nameof(AudioCppOptionScope.Request) && o.Value.Length > 0))
+            {
+                request.SetOption(option.Name, option.Value);
+            }
+            using var result = _session!.Run(request);
+
+            if (result.Text is { } text && text.Text.Length > 0) pieces.Add(text.Text.Trim());
+            foreach (var word in result.Words)
+            {
+                rows.Add(new ResultRow(
+                    "word",
+                    $"{(start + word.StartSample) / (double)rate:F2}–{(start + word.EndSample) / (double)rate:F2}s",
+                    word.Word,
+                    word.Confidence.ToString("F3")));
+            }
+        }
+
+        var speech = groups.Sum(g => (g.End - g.Start)) / (double)rate;
+        _segmentedSummary = $"{groups.Count} group(s) from {segments.Count} VAD segment(s), "
+                          + $"{speech:F1}s of speech.";
+        return string.Join(" ", pieces);
+    }
+
+    private static List<(long Start, long End)> GroupSegments(
+        List<(long Start, long End)> segments, int rate, double minSpan, double maxSpan, int totalSamples)
+    {
+        var groups = new List<(long Start, long End)>();
+        if (segments.Count == 0) return groups;
+
+        var limit = (long)(maxSpan * rate);
+        void Add(long start, long end)
+        {
+            end = Math.Min(end, totalSamples);
+            for (var s = start; s < end; s += limit) groups.Add((s, Math.Min(s + limit, end)));
+        }
+
+        var (gs, ge) = segments[0];
+        for (var i = 1; i < segments.Count; i++)
+        {
+            var span = (ge - gs) / (double)rate;
+            var wouldBe = (segments[i].End - gs) / (double)rate;
+            if (span >= minSpan || wouldBe > maxSpan)
+            {
+                Add(gs, ge);
+                (gs, ge) = segments[i];
+            }
+            else ge = segments[i].End;
+        }
+        Add(gs, ge);
+        return groups;
     }
 
     private async Task SaveWavAsync()
@@ -312,8 +530,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private static string Describe(Exception exception) => exception switch
     {
         AudioCppException native => $"{native.Operation} failed: {native.Detail} [{native.Status}]",
-        DllNotFoundException => "libaudiocpp was not found. Set AUDIOCPP_NATIVE_DIR to the directory "
-                               + "containing it, or place it beside this executable.",
+        DllNotFoundException => "libaudiocpp was not found. Set AUDIOCPP_NATIVE_DIR to the "
+                               + "directory holding it (an audio.cpp build's bin/), or copy it "
+                               + "beside this executable, then restart.",
         _ => $"{exception.GetType().Name}: {exception.Message}",
     };
 
@@ -327,11 +546,178 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return true;
     }
 
+    /// <summary>
+    /// Clip length past which the engine's own path cannot cope, so the preset takes over.
+    /// </summary>
+    /// <remarks>
+    /// The encoder builds a relative positional encoding sized by max_position_embeddings,
+    /// 5000 frames in the shipped Parakeet config, and throws outright above it. One
+    /// encoder frame is 80ms after the FastConformer's 8x subsampling at a 10ms hop, so
+    /// the wall is 400s; 300s leaves room for a checkpoint configured differently.
+    ///
+    /// Under it, leave the engine alone -- it already switches to bounded windows past
+    /// audio_chunk_threshold_sec. Measured on a 90s clip, the untouched path transcribed
+    /// 236 words in 1.4s and the preset 226 in 1.9s, so applying it everywhere would buy
+    /// nothing and cost accuracy on exactly the clips that never needed it.
+    /// </remarks>
+    private const double FullContextCeilingSeconds = 300;
+
+    /// <summary>
+    /// Options that put the engine's own VAD chunking in charge of a long recording.
+    /// </summary>
+    /// <remarks>
+    /// Measured on a 10-minute clip, CUDA: 5.7s and 1483 words, against 35s for
+    /// segmenting in this app and calling ASR per group, and an outright failure for the
+    /// engine's untouched defaults.
+    ///
+    /// audio_chunk_duration_sec is set because the engine's own default of 2s slices
+    /// mid-utterance badly enough to lose words.
+    ///
+    /// offline_mode=long_form is load-bearing and not obviously so. The engine sizes the
+    /// encoder graph in prepare(), which consults offline_mode but not audio_chunk_mode,
+    /// so asking for vad chunking alone still sizes the graph for the whole recording and
+    /// throws on anything past the full-context ceiling. long_form makes prepare() agree
+    /// with the path the run will take.
+    ///
+    /// Hardcoded per family rather than discovered, which is the exception to how the
+    /// rest of this window works. The shipped Parakeet GGUF embeds a model spec predating
+    /// these controls, so it advertises neither them nor offline_mode — the options
+    /// function, they are simply absent from what the model says about itself. Drop this
+    /// once the package is regenerated and the Options grid will carry them on its own.
+    /// </remarks>
+    private (List<KeyValuePair<string, string>> Session, List<KeyValuePair<string, string>> Request)
+        ChunkingPreset(double seconds)
+    {
+        var session = new List<KeyValuePair<string, string>>();
+        var request = new List<KeyValuePair<string, string>>();
+
+        // Only for audio tasks, only when this app is not segmenting already, and only
+        // for a family known to implement it.
+        if (Task == "tts" || _vadModel is not null || !UseBuiltInChunking) return (session, request);
+        if (_model?.Family != "parakeet_tdt") return (session, request);
+        if (seconds < FullContextCeilingSeconds) return (session, request);
+
+        session.Add(new("parakeet_tdt.offline_mode", "long_form"));
+
+        // vad chunking cuts between utterances; fixed cuts on a timer and loses words at
+        // every boundary. Measured on the same 10-minute clip, vad transcribed 1483 words
+        // and fixed 1372, dropping whole clauses. So prefer vad, but it needs a Silero
+        // checkpoint on disk that the engine looks for relative to the process's working
+        // directory -- fall back rather than fail when this app is not launched from
+        // beside one.
+        var vadAsset = ResolveVadAsset();
+        if (vadAsset is null)
+        {
+            request.Add(new("audio_chunk_mode", "fixed"));
+        }
+        else
+        {
+            request.Add(new("audio_chunk_mode", "vad"));
+            session.Add(new("parakeet_tdt.vad_model_path", vadAsset));
+        }
+
+        request.Add(new("audio_chunk_duration_sec", ChunkSeconds.ToString(
+            System.Globalization.CultureInfo.InvariantCulture)));
+        return (session, request);
+    }
+
+    /// <summary>
+    /// Locate the Silero checkpoint the engine's vad chunker loads, or null if this
+    /// machine has no copy where we can find one.
+    /// </summary>
+    /// <remarks>
+    /// The engine defaults to the relative path assets/framework/models/silero_vad, which
+    /// resolves only when the process runs from an audio.cpp checkout. VadAssetPath lets
+    /// the window say where it really is; otherwise look beside the native library, since
+    /// a build tree sits next to the assets directory it was built from.
+    /// </remarks>
+    private string? ResolveVadAsset()
+    {
+        static string? Check(string? directory) =>
+            directory is { Length: > 0 }
+            && File.Exists(Path.Combine(directory, "silero_vad_16k.safetensors"))
+                ? directory : null;
+
+        if (Check(VadAssetPath) is { } explicitPath) return explicitPath;
+
+        var relative = Path.Combine("assets", "framework", "models", "silero_vad");
+        var roots = new List<string> { Directory.GetCurrentDirectory() };
+        var native = Environment.GetEnvironmentVariable("AUDIOCPP_NATIVE_DIR");
+        for (var dir = native is { Length: > 0 } ? new DirectoryInfo(native) : null;
+             dir is not null; dir = dir.Parent)
+        {
+            roots.Add(dir.FullName);
+        }
+
+        return roots.Select(root => Check(Path.Combine(root, relative)))
+                    .FirstOrDefault(found => found is not null);
+    }
+
+    /// <summary>
+    /// Physical cores, which is what ggml wants. Environment.ProcessorCount reports
+    /// logical CPUs, and running one thread per SMT sibling measured 1.8x SLOWER than
+    /// one per core on an 8-core/16-thread machine -- the siblings contend for the same
+    /// execution units and caches while the per-graph-node barriers spin.
+    /// </summary>
+    private static int PhysicalCoreCount()
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux() && File.Exists("/proc/cpuinfo"))
+            {
+                var seen = new HashSet<string>();
+                string physical = "", core = "";
+                foreach (var line in File.ReadLines("/proc/cpuinfo"))
+                {
+                    if (line.StartsWith("physical id")) physical = line;
+                    else if (line.StartsWith("core id")) core = line;
+                    else if (line.Length == 0 && core.Length > 0) { seen.Add(physical + core); physical = core = ""; }
+                }
+                if (core.Length > 0) seen.Add(physical + core);
+                if (seen.Count > 0) return seen.Count;
+            }
+        }
+        catch (IOException)
+        {
+            // Unreadable cpuinfo is not worth failing over; fall through.
+        }
+        return Math.Max(1, Environment.ProcessorCount / 2);
+    }
+
     private void Notify(string? name) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
-public readonly record struct DeclaredOption(
-    string Scope, string Name, string Type, string Default, string Range, bool Required);
+/// <summary>
+/// One declared option, as the model describes itself at runtime, plus whatever the
+/// user has typed for it. <see cref="Value"/> is the only mutable part: leave it empty
+/// and the model's own default applies.
+/// </summary>
+public sealed class DeclaredOption(
+    string scope, string name, string type, string @default, string range, bool required)
+    : INotifyPropertyChanged
+{
+    private string _value = "";
+
+    public string Scope { get; } = scope;
+    public string Name { get; } = name;
+    public string Type { get; } = type;
+    public string Default { get; } = @default;
+    public string Range { get; } = range;
+    public bool Required { get; } = required;
+
+    public string Value
+    {
+        get => _value;
+        set
+        {
+            if (_value == value) return;
+            _value = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Value)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
 
 public readonly record struct ResultRow(string Kind, string Span, string Value, string Detail);
