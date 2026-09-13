@@ -1143,11 +1143,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         var relative = Path.Combine("assets", "framework", "models", "silero_vad");
         var roots = new List<string> { Directory.GetCurrentDirectory() };
+
         var native = Environment.GetEnvironmentVariable("AUDIOCPP_NATIVE_DIR");
         for (var dir = native is { Length: > 0 } ? new DirectoryInfo(native) : null;
              dir is not null; dir = dir.Parent)
         {
             roots.Add(dir.FullName);
+        }
+
+        // Also look for a sibling audio.cpp checkout, as the native library
+        // lookup does. Without this the app starts fine without any environment
+        // set but quietly falls back to fixed chunking, which is worse: the
+        // difference is a silent 111 words on a 10-minute clip, not an error.
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            roots.Add(Path.Combine(dir.FullName, "audio.cpp"));
         }
 
         return roots.Select(root => Check(Path.Combine(root, relative)))

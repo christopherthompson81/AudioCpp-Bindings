@@ -46,7 +46,34 @@ public sealed class PackageInstaller(HttpClient? client = null)
 
     /// <summary>Where a package's files belong under <paramref name="modelsRoot"/>.</summary>
     public static string TargetDirectory(string modelsRoot, PackageSpec package) =>
-        Path.Combine(modelsRoot, package.TargetDirectory);
+        Contain(modelsRoot, Path.Combine(modelsRoot, package.TargetDirectory),
+                package.TargetDirectory);
+
+    /// <summary>
+    /// Assert a path stays under the models root.
+    /// </summary>
+    /// <remarks>
+    /// Specs are data fetched from a repository, so neither target_directory nor
+    /// a file path gets to decide where this writes. Absolute paths matter more
+    /// than "..": Path.Combine("/models", "/etc") discards the root silently and
+    /// returns "/etc", so a check on segments alone would not catch it.
+    /// </remarks>
+    private static string Contain(string modelsRoot, string candidate, string offending)
+    {
+        var root = Path.GetFullPath(modelsRoot);
+        var full = Path.GetFullPath(candidate);
+
+        var boundary = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root : root + Path.DirectorySeparatorChar;
+
+        if (!full.StartsWith(boundary, StringComparison.Ordinal)
+            && !string.Equals(full, root, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"package path escapes the models root: '{offending}'");
+        }
+        return full;
+    }
 
     /// <summary>
     /// Local path for one of a package's repository-relative files, with the
@@ -63,12 +90,10 @@ public sealed class PackageInstaller(HttpClient? client = null)
         }
 
         var parts = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        // Reject traversal: the spec is data fetched from a repository, so it
-        // does not get to write outside the models root.
-        if (parts.Any(p => p == ".."))
-            throw new InvalidOperationException($"package file escapes the models root: {file}");
-
-        return Path.Combine([TargetDirectory(modelsRoot, package), .. parts]);
+        return Contain(
+            modelsRoot,
+            Path.Combine([TargetDirectory(modelsRoot, package), .. parts]),
+            file);
     }
 
     public static InstallState StateOf(string modelsRoot, PackageSpec package)

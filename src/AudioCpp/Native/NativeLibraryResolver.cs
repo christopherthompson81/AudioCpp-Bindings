@@ -60,15 +60,13 @@ internal static class NativeLibraryResolver
         // likeliest to have built most recently.
         string[] builds = ["build", "build-cuda", "build-release", "cmake-build-release"];
 
+        // Walking up already visits every ancestor, so checking dir and dir.Parent
+        // on each step would probe each one twice.
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            foreach (var root in new[] { dir, dir.Parent })
+            foreach (var build in builds)
             {
-                if (root is null) continue;
-                foreach (var build in builds)
-                {
-                    yield return Path.Combine(root.FullName, "audio.cpp", build, "bin");
-                }
+                yield return Path.Combine(dir.FullName, "audio.cpp", build, "bin");
             }
         }
     }

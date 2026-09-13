@@ -92,6 +92,37 @@ internal static class Program
             }
         }
 
+        // Spec-supplied paths must not be able to write outside the models root.
+        // Absolute paths are the dangerous case: Path.Combine discards the root.
+        foreach (var (label, target, file) in new[]
+                 {
+                     ("traversal target", "../escaped", "a.gguf"),
+                     ("absolute target", OperatingSystem.IsWindows() ? "C:\\evil" : "/etc", "a.gguf"),
+                     ("traversal file", "ok", "../../escaped.gguf"),
+                     ("absolute file", "ok", OperatingSystem.IsWindows() ? "C:\\evil.gguf" : "/etc/passwd"),
+                 })
+        {
+            var hostile = new PackageSpec("hostile", "Hostile", "gguf", "q8_0", target,
+                                          [file], null, false,
+                                          new DownloadSpec("huggingface_snapshot", "x/y", "main", false));
+            // Either outcome is fine -- rejected outright, or neutralised into a
+            // path inside the root. What must never happen is a write outside it.
+            try
+            {
+                var resolved = PackageInstaller.LocalPath(root, hostile, file);
+                var boundary = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
+                if (!resolved.StartsWith(boundary, StringComparison.Ordinal))
+                {
+                    Console.Error.WriteLine($"  ESCAPED via {label}: {resolved}");
+                    failures++;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Rejected, which is also correct.
+            }
+        }
+
         var parakeet = catalog.Families.FirstOrDefault(f => f.Family == "parakeet_tdt");
         if (parakeet is not null)
         {
