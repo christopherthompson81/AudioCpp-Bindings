@@ -77,6 +77,8 @@ internal static class Smoke
                 case "split": viewModel.SplitLongText = bool.Parse(parts[1]); continue;
                 case "budget": viewModel.ChunkBudget = int.Parse(parts[1]); continue;
                 case "text": viewModel.Text = parts[1]; continue;
+                case "voice_ref": viewModel.VoiceAudioPath = parts[1]; continue;
+                case "voice_text": viewModel.VoiceTranscript = parts[1]; continue;
                 case "capture":
                     viewModel.CaptureDevice = viewModel.CaptureDevices
                         .FirstOrDefault(d => d.Index == int.Parse(parts[1]));
@@ -155,6 +157,8 @@ internal static class Smoke
         }
         Console.WriteLine($"timing: {viewModel.TimingBreakdown}");
         Console.WriteLine($"word timings: {viewModel.HasWordTimings}");
+        Console.WriteLine($"supports reference: {viewModel.SupportsVoiceReference}, "
+                          + $"reference set: {viewModel.VoiceAudioPath.Length > 0}");
         if (args.Contains("--srt") && viewModel.HasWordTimings)
         {
             var srt = viewModel.SubtitlePreview("srt");
