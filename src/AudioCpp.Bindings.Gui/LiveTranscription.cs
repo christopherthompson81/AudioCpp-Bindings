@@ -19,6 +19,14 @@ namespace AudioCpp.Bindings.Gui;
 /// </remarks>
 public sealed class LiveTranscription : IDisposable
 {
+    /// <summary>
+    /// The rate everything here runs at. Parakeet's streaming contract rejects
+    /// anything else, and word offsets in the result are in these frames, so
+    /// one constant serves both the device and anyone converting offsets to
+    /// time.
+    /// </summary>
+    public const int SampleRate = 16000;
+
     private readonly AudioCppSession _session;
     private readonly CaptureSession _capture;
     private readonly CancellationTokenSource _stop = new();
@@ -50,7 +58,7 @@ public sealed class LiveTranscription : IDisposable
         CaptureSession capture;
         try
         {
-            capture = AudioCapture.Open(device, sampleRate: 16000, channels: 1);
+            capture = AudioCapture.Open(device, sampleRate: SampleRate, channels: 1);
         }
         catch
         {
@@ -65,7 +73,7 @@ public sealed class LiveTranscription : IDisposable
             // one-frame buffer declares 16 kHz mono without pretending to send
             // a clip that does not exist yet.
             using var contract = new AudioCppRequest();
-            contract.SetAudio(new float[1], 16000, 1);
+            contract.SetAudio(new float[1], SampleRate, 1);
             session.StartStream(contract);
 
             capture.Start();
@@ -84,7 +92,7 @@ public sealed class LiveTranscription : IDisposable
         // The engine names its preferred window; pushing in that size avoids it
         // re-buffering. Falls back to a second when it declines to say.
         var policy = _session.GetStreamPolicy();
-        var chunk = policy.PreferredChunkSamples > 0 ? (int)policy.PreferredChunkSamples : 16000;
+        var chunk = policy.PreferredChunkSamples > 0 ? (int)policy.PreferredChunkSamples : SampleRate;
 
         var pending = new float[chunk];
         var filled = 0;
@@ -100,7 +108,7 @@ public sealed class LiveTranscription : IDisposable
                 {
                     // Poll rather than spin: a quarter of the window is frequent
                     // enough to keep a one-second ring buffer from overrunning.
-                    await Task.Delay(Math.Max(10, chunk / 16000 * 250 / 4), _stop.Token);
+                    await Task.Delay(Math.Max(10, chunk / SampleRate * 250 / 4), _stop.Token);
                     OnLevel?.Invoke(_capture.TakePeak(), _capture.TakeOverruns());
                     continue;
                 }
@@ -109,7 +117,7 @@ public sealed class LiveTranscription : IDisposable
                 filled += frames;
                 if (filled < chunk) continue;
 
-                var evt = _session.PushStream(pending.AsSpan(0, filled), 16000, 1, sample);
+                var evt = _session.PushStream(pending.AsSpan(0, filled), SampleRate, 1, sample);
                 sample += filled;
                 filled = 0;
 

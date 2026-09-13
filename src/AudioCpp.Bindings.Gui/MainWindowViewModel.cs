@@ -54,7 +54,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private ResultRow? _selectedRow;
     private bool _showAllOptions;
     private readonly List<(string Word, long StartSample, long EndSample)> _words = [];
-    private int _resultSampleRate = 16000;
+    // Word offsets from a live run are in the capture rate, not a guess. Tied to
+    // the one constant the pump and the device both use.
+    private int _resultSampleRate = LiveTranscription.SampleRate;
     private string _timingBreakdown = "";
     private string _playStatus = "";
     private string _task = "asr";
