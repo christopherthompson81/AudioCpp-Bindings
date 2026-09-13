@@ -347,6 +347,26 @@ internal static class LiveCheck
                         }
                     }
 
+                    // The selector has to open on the language actually being
+                    // rendered. It did not: an Italian machine showed an Italian
+                    // window with "English" selected, and picking English was a
+                    // no-op because it was already the selection.
+                    var started = System.Globalization.CultureInfo.CurrentUICulture;
+                    foreach (var (machine, expected) in new[]
+                             { ("it-IT", "Italiano"), ("zh-CN", "中文"), ("ru", "Русский"),
+                               ("de-DE", "English"), ("en-CA", "English") })
+                    {
+                        System.Globalization.CultureInfo.CurrentUICulture =
+                            new System.Globalization.CultureInfo(machine);
+                        var opens = Resources.Loc.InitialLanguage();
+                        Console.WriteLine($"  machine {machine,-6} -> selector {opens}");
+                        if (opens != expected)
+                        {
+                            Console.Error.WriteLine($"  expected {expected}"); failures++;
+                        }
+                    }
+                    System.Globalization.CultureInfo.CurrentUICulture = started;
+
                     Resources.Strings.Culture = new System.Globalization.CultureInfo("en");
                     Console.WriteLine($"missing key falls back to itself: "
                                       + $"'{Resources.Strings.Get("no.such.key")}'");

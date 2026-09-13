@@ -60,7 +60,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _timingBreakdown = "";
     private string _page = "Studio";
     private string _theme = "System";
-    private string _language = "English";
+    private string _language = Resources.Loc.InitialLanguage();
     private readonly VoiceLibrary _voices = new();
     private SavedVoice? _selectedVoice;
     private string _voiceAudioPath = "";

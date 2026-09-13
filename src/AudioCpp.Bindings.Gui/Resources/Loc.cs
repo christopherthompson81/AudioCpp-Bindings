@@ -64,6 +64,28 @@ public sealed class Loc : INotifyPropertyChanged
         return languages;
     }
 
+    /// <summary>
+    /// The language to start in, from the machine's own setting.
+    /// </summary>
+    /// <remarks>
+    /// Strings.Culture starts at CurrentUICulture, so an Italian machine
+    /// renders Italian whatever the selector says. Before there were any
+    /// translations that was invisible; with them, the selector read "English"
+    /// over an Italian window, and picking English changed nothing because it
+    /// was already the selected item. The selector has to start on what is
+    /// actually being shown.
+    ///
+    /// Matched on the language alone: pt-BR and pt-PT are different languages
+    /// to a translator, but a catalogue that only has "pt" should still serve
+    /// both rather than silently falling back to English.
+    /// </remarks>
+    public static string InitialLanguage()
+    {
+        var language = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+        var match = Translations.FirstOrDefault(t => t.Culture == language);
+        return match.Display ?? "English";
+    }
+
     public string this[string key] => Strings.Get(key);
 
     /// <summary>Switch language and refresh everything bound through this.</summary>
