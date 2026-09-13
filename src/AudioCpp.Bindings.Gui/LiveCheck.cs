@@ -243,6 +243,14 @@ internal static class LiveCheck
                             Console.WriteLine($"  {entry.Time} {entry.Kind,-7} {entry.Message}");
                     }
 
+                    if (args.FirstOrDefault(a => a.StartsWith("lang="))?["lang=".Length..] is { } lang)
+                    {
+                        viewModel.Language = lang == "pseudo" ? "Pseudo (qps-ploc)" : "English";
+                        await Task.Delay(400);
+                        Console.WriteLine($"language: {viewModel.Language}  "
+                                          + $"task title now '{viewModel.TaskTitle}'");
+                    }
+
                     if (args.FirstOrDefault(a => a.StartsWith("page="))?["page=".Length..] is { } page)
                     {
                         viewModel.Page = page;
@@ -266,6 +274,39 @@ internal static class LiveCheck
                     return;
                 }
 
+                if (args.Contains("--strings-check"))
+                {
+                    var keys = new[] { "action.run", "task.asr.title", "section.request",
+                                       "label.splitLongText", "nav.arena" };
+                    foreach (var culture in new[] { "en", "qps-ploc" })
+                    {
+                        Resources.Strings.Culture = new System.Globalization.CultureInfo(culture);
+                        var rendered = keys.Select(Resources.Strings.Get).ToList();
+                        Console.WriteLine($"{culture,-9} {string.Join(" | ", rendered)}");
+
+                        // A key coming back as itself means the resource is missing,
+                        // which is what an unextracted or mistyped key looks like.
+                        var missing = keys.Where((k, i) => rendered[i] == k).ToList();
+                        if (missing.Count > 0)
+                        {
+                            Console.Error.WriteLine($"  unresolved in {culture}: {string.Join(", ", missing)}");
+                            failures++;
+                        }
+                    }
+
+                    Resources.Strings.Culture = new System.Globalization.CultureInfo("en");
+                    Console.WriteLine($"missing key falls back to itself: "
+                                      + $"'{Resources.Strings.Get("no.such.key")}'");
+                    if (Resources.Strings.Get("no.such.key") != "no.such.key")
+                    {
+                        Console.Error.WriteLine("missing key did not fall back"); failures++;
+                    }
+
+                    Console.WriteLine(failures == 0 ? "strings OK" : $"strings: {failures} failure(s)");
+                    Environment.Exit(failures == 0 ? 0 : 1);
+                    return;
+                }
+
                 if (args.Contains("--voice-check"))
                 {
                     var library = new VoiceLibrary(System.IO.Path.Combine(
@@ -277,12 +318,21 @@ internal static class LiveCheck
                     var sample = new SavedVoice("check", "/nonexistent/ref.wav", "the words spoken");
                     library.Save([sample]);
                     var read = library.Load();
-                    Console.WriteLine($"saved 1, loaded {read.Count}: "
-                                      + $"name='{read.FirstOrDefault().Name}' "
-                                      + $"transcript='{read.FirstOrDefault().Transcript}' "
-                                      + $"exists={read.FirstOrDefault().Exists}");
-                    if (read.Count != 1 || read[0].Name != "check") { Console.Error.WriteLine("round trip failed"); failures++; }
-                    if (read[0].Exists) { Console.Error.WriteLine("a missing file reported as present"); failures++; }
+                    if (read.Count != 1 || read[0].Name != "check")
+                    {
+                        Console.Error.WriteLine($"round trip failed: loaded {read.Count}");
+                        failures++;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"saved 1, loaded 1: name='{read[0].Name}' "
+                                          + $"transcript='{read[0].Transcript}' exists={read[0].Exists}");
+                        if (read[0].Exists)
+                        {
+                            Console.Error.WriteLine("a missing file reported as present");
+                            failures++;
+                        }
+                    }
 
                     // A corrupt library must not stop the app starting.
                     await File.WriteAllTextAsync(library.StorePath, "{ this is not json");

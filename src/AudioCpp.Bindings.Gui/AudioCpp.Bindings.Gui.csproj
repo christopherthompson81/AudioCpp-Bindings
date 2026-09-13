@@ -21,6 +21,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Resources are embedded by convention; satellite assemblies are produced
+         for every Strings.<culture>.resx alongside. -->
+    <EmbeddedResource Update="Resources/Strings.resx">
+      <LogicalName>AudioCpp.Bindings.Gui.Resources.Strings.resources</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../AudioCpp/AudioCpp.csproj" />
     <ProjectReference Include="../AudioCpp.Audio/AudioCpp.Audio.csproj" />
     <ProjectReference Include="../AudioCpp.Packages/AudioCpp.Packages.csproj" />
