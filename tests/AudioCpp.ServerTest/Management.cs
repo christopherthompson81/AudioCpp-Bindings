@@ -164,6 +164,35 @@ internal static class Management
         Check("and is not left registered, failing every request sent to it",
               !afterBad.Contains("\"broken\"", StringComparison.Ordinal), afterBad);
 
+        // A reconfiguration that fails must leave the working registration
+        // alone. Rolling it forward into "forget it" would mean one typo in a
+        // path deletes a model that was serving requests a moment earlier.
+        var brokenReconfigure = await PostAsync("/v1/models/load",
+            JsonSerializer.Serialize(new { id = "second", path = "/no/such/model.gguf" }));
+        Check("a failed reconfiguration is a 400",
+              brokenReconfigure.Status == HttpStatusCode.BadRequest);
+        var stillThere = await http.GetStringAsync("/v1/models");
+        Check("and leaves the registration it was replacing",
+              stillThere.Contains("\"second\"", StringComparison.Ordinal), stillThere);
+        var stillWorks = await PostAsync("/v1/tasks/run",
+            JsonSerializer.Serialize(new { model = "second", request = new { audio } }));
+        Check("which still serves requests", stillWorks.Status == HttpStatusCode.OK,
+              stillWorks.Body.Length > 120 ? stillWorks.Body[..120] : stillWorks.Body);
+
+        // Word offsets need the rate that counts them, and a transcription
+        // returns no audio to read it from.
+        var detailed = await PostAsync("/v1/tasks/run",
+            JsonSerializer.Serialize(new { model = "asr", request = new { audio } }));
+        using (var document = JsonDocument.Parse(detailed.Body))
+        {
+            var hasOffsets = document.RootElement.TryGetProperty("words", out var words)
+                             && words.GetArrayLength() > 0;
+            var rate = document.RootElement.TryGetProperty("sample_rate", out var value)
+                ? value.GetInt32() : 0;
+            Check("offsets come with the rate that counts them, from the input audio",
+                  !hasOffsets || rate > 0, $"words={hasOffsets} sample_rate={rate}");
+        }
+
         var unloadOne = await PostAsync("/v1/models/unload", """{"id":"second"}""");
         Check("models/unload is 200", unloadOne.Status == HttpStatusCode.OK, unloadOne.Body);
         var unloadUnknown = await PostAsync("/v1/models/unload", """{"id":"nope"}""");

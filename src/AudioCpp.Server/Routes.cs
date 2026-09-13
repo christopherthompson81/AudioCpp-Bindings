@@ -416,7 +416,7 @@ internal static class Routes
 
             var wall = started.Elapsed.TotalMilliseconds;
             log($"POST /v1/tasks/run  {request.Model}  {wall:F0} ms");
-            return Results.Json(result.ToJson(wall));
+            return Results.Json(result.ToJson(wall, request.Audio?.SampleRate ?? 0));
         }
         catch (OperationCanceledException)
         {
@@ -463,6 +463,10 @@ internal static class Routes
             Field("task") is { Length: > 0 } task ? task : "tts",
             Field("mode") is { Length: > 0 } mode ? mode : "offline");
 
+        // Kept so a failed load can put back what was there. Rolling forward
+        // into "forget it" would mean a reconfiguration with a typo in the path
+        // deletes a registration that was working a moment ago.
+        var previous = pool.Spec(id);
         try
         {
             var reconfigured = await pool.RegisterAsync(spec, cancel);
@@ -477,9 +481,11 @@ internal static class Routes
         catch (AudioCppException error)
         {
             // The registration stands or falls with the load: a model that
-            // cannot be opened must not be left in the list answering /v1/models
-            // and failing every request sent to it.
-            await pool.ForgetAsync(id, CancellationToken.None);
+            // cannot be opened must not be left in the list answering
+            // /v1/models and failing every request sent to it. A reconfiguration
+            // goes back to what it was instead of being dropped.
+            if (previous is not null) await pool.RegisterAsync(previous, CancellationToken.None);
+            else await pool.ForgetAsync(id, CancellationToken.None);
             log($"POST /v1/models/load  {id}  failed: {error.Message}");
             return Problem(400, "invalid_request_error", error.Message);
         }

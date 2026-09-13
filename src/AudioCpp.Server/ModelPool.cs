@@ -68,18 +68,24 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
             return false;
         }
 
-        // Anything already resident under this id was loaded from the old
-        // configuration, so it has to go before the new one is recorded --
-        // otherwise the next request is served by the previous weights under
-        // the new description, which is the kind of mismatch that gets debugged
-        // as a model quality problem.
-        if (previous is not null) await UnloadAsync(spec.Id, cancel);
-
+        // Recorded before the old weights are released, not after. Unloading
+        // first leaves a window in which the id is registered under the old
+        // description with nothing resident, so a request arriving in it
+        // reloads the *old* model -- producing exactly the mismatch this is
+        // meant to prevent, and only under concurrency, which is the hardest
+        // version of it to ever see again. Swapping first means a request in
+        // that window loads the new description; the unload below then frees
+        // it and the one after reloads it, which costs a load and is correct.
         lock (_specsLock)
         {
-            _specs.RemoveAll(m => m.Id == spec.Id);
-            _specs.Add(spec);
+            var at = _specs.FindIndex(m => m.Id == spec.Id);
+            // Replaced in place rather than appended, so a reconfiguration does
+            // not shuffle the id to the end of /v1/models and make a client's
+            // list look like it changed membership.
+            if (at >= 0) _specs[at] = spec;
+            else _specs.Add(spec);
         }
+        if (previous is not null) await UnloadAsync(spec.Id, cancel);
         _refusesLanguage.TryRemove(spec.Id, out _);
         return previous is not null;
     }

@@ -47,7 +47,11 @@ internal sealed record Ran(
     /// and the one that survives JSON — a float array of a minute of 48 kHz
     /// stereo is tens of megabytes of decimal text.
     /// </remarks>
-    public Dictionary<string, object?> ToJson(double wallMs)
+    /// <param name="inputSampleRate">
+    /// The rate of the audio that went in, which is what the offsets below are
+    /// counted in when the model returned no audio of its own.
+    /// </param>
+    public Dictionary<string, object?> ToJson(double wallMs, int inputSampleRate)
     {
         var payload = new Dictionary<string, object?>();
         if (Text.Length > 0)
@@ -115,11 +119,14 @@ internal sealed record Ran(
         }
 
         // The rate the offsets above are counted in, present only when there
-        // are offsets to count. On this route it can also come from the output
-        // audio, which is the same number for a model that produced both.
-        if (Segments.Count > 0 || SpeakerTurns.Count > 0 || Words.Count > 0)
+        // are offsets to count and a rate to report. A transcription returns no
+        // audio, so the rate is the input's; emitting a 0 instead would hand a
+        // client a divisor that turns every offset into infinity, which is
+        // worse than leaving it to ask.
+        var rate = Audio?.SampleRate ?? inputSampleRate;
+        if (rate > 0 && (Segments.Count > 0 || SpeakerTurns.Count > 0 || Words.Count > 0))
         {
-            payload["sample_rate"] = Audio?.SampleRate ?? 0;
+            payload["sample_rate"] = rate;
         }
 
         var seconds = Audio?.Duration
