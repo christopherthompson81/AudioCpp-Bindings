@@ -4,6 +4,8 @@ using System.Text;
 using System.Runtime.CompilerServices;
 using AudioCpp.Native;
 using AudioCpp.Packages;
+using AudioCpp.Audio;
+using Avalonia.Threading;
 
 namespace AudioCpp.Bindings.Gui;
 
@@ -40,6 +42,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private int _chunkBudget = 1000;
     private readonly List<AudioSegment> _segments = [];
     private CancellationTokenSource? _cancel;
+    private LiveTranscription? _live;
+    private bool _togglingRecording;
+    private CaptureDeviceInfo? _captureDevice;
+    private bool _isRecording;
+    private float _inputLevel;
+    private string _liveStatus = "";
     private string _task = "asr";
     private string _audioPath = "";
     private string _text = "The quick brown fox jumps over the lazy dog.";
@@ -76,7 +84,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         DeleteCommand = new RelayCommand(
             DeleteAsync, () => !_busy && _selectedEntry is { State: not InstallState.Missing });
 
+        RecordCommand = new RelayCommand(
+            ToggleRecordingAsync,
+            () => _isRecording || (!_busy && _isLoaded && _task == "asr"));
+
         LoadCatalog();
+        LoadCaptureDevices();
     }
 
     public RelayCommand LoadCommand { get; }
@@ -96,6 +109,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     /// <summary>Remove an installed package's files from the models root.</summary>
     public RelayCommand DeleteCommand { get; }
+
+    /// <summary>Start or stop microphone transcription.</summary>
+    public RelayCommand RecordCommand { get; }
 
     /// <summary>Set by the view so file pickers can be opened from here.</summary>
     public Func<string, bool, Task<string?>>? PickPath { get; set; }
@@ -118,6 +134,36 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         get => TaskChips.FirstOrDefault(c => c.Task == _task);
         set { if (value is not null) Task = value.Task; }
     }
+
+    /// <summary>Capture devices the system offers, refreshed on demand.</summary>
+    public ObservableCollection<CaptureDeviceInfo> CaptureDevices { get; } = [];
+
+    /// <summary>Null means the system default, which is what most users want.</summary>
+    public CaptureDeviceInfo? CaptureDevice
+    {
+        get => _captureDevice;
+        set => Set(ref _captureDevice, value);
+    }
+
+    public bool IsRecording
+    {
+        get => _isRecording;
+        private set
+        {
+            if (!Set(ref _isRecording, value)) return;
+            Notify(nameof(RecordLabel));
+            RecordCommand.RaiseCanExecuteChanged();
+            RunCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    public string RecordLabel => _isRecording ? "Stop" : "Record";
+
+    /// <summary>Peak level 0..1 for the meter.</summary>
+    public float InputLevel { get => _inputLevel; private set => Set(ref _inputLevel, value); }
+
+    /// <summary>Device, backend, and any dropped frames.</summary>
+    public string LiveStatus { get => _liveStatus; private set => Set(ref _liveStatus, value); }
 
     /// <summary>Every installable package, read from audio.cpp's model_specs.</summary>
     public List<CatalogEntry> AllEntries { get; } = [];
@@ -436,6 +482,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Status = "Loading…";
         try
         {
+            // A recording holds a session built from the model about to be freed.
+            // The ABI keeps parents alive so this would not crash, but the pump
+            // would go on feeding a model the user believes they replaced.
+            await StopRecordingAsync();
+
             await System.Threading.Tasks.Task.Run(() =>
             {
                 // Freed in reverse, though the ABI keeps parents alive so order is free.
@@ -997,6 +1048,119 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         DeleteCommand.RaiseCanExecuteChanged();
         Notify(nameof(SelectedSummary));
         return System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Stop and release a live recording if one is running. Safe to call when
+    /// none is, and used both by the Record button and on shutdown -- without
+    /// the latter the microphone stays open until the process exits.
+    /// </summary>
+    public async Task StopRecordingAsync()
+    {
+        if (_live is null) return;
+
+        var live = _live;
+        _live = null;
+        try { await live.StopAsync(); }
+        catch (AudioCppException) { /* nothing to finish */ }
+        live.Dispose();
+
+        IsRecording = false;
+        InputLevel = 0;
+    }
+
+    private void LoadCaptureDevices()
+    {
+        try
+        {
+            CaptureDevices.Clear();
+            foreach (var device in AudioCapture.Devices()) CaptureDevices.Add(device);
+            CaptureDevice = CaptureDevices.FirstOrDefault(d => d.IsDefault);
+            LiveStatus = $"{CaptureDevices.Count} input(s) via {AudioCapture.Backend}";
+        }
+        catch (DllNotFoundException)
+        {
+            // Capture is optional: the rest of the app works without it.
+            LiveStatus = "audio capture unavailable (build native/audiocapture)";
+        }
+    }
+
+    /// <summary>
+    /// Toggle live transcription.
+    /// </summary>
+    /// <remarks>
+    /// The pump runs on its own thread and reports through callbacks, so every
+    /// one of them hops to the UI thread before touching bound state. Avalonia
+    /// will not always throw when this is got wrong -- it sometimes just stops
+    /// updating -- which is why it is done explicitly rather than by habit.
+    /// </remarks>
+    private async Task ToggleRecordingAsync()
+    {
+        // Stopping awaits the pump, and the button stays live during that await.
+        // A second press would otherwise stop the same session twice.
+        if (_togglingRecording) return;
+        _togglingRecording = true;
+        try
+        {
+            await ToggleRecordingCoreAsync();
+        }
+        finally
+        {
+            _togglingRecording = false;
+            RecordCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    private async Task ToggleRecordingCoreAsync()
+    {
+        if (_live is not null)
+        {
+            var live = _live;
+            _live = null;
+            var final = "";
+            try { final = await live.StopAsync(); }
+            finally { live.Dispose(); }
+            IsRecording = false;
+            InputLevel = 0;
+
+            if (final.Length > 0) Transcript = final;
+            Status = final.Length > 0
+                ? $"Recorded {final.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length} words."
+                : "Stopped; nothing was transcribed.";
+            return;
+        }
+
+        if (_model is null) { Status = "Load a model first."; return; }
+
+        try
+        {
+            Transcript = "";
+            Rows.Clear();
+
+            _live = LiveTranscription.Start(_model, Backend, Threads, CaptureDevice);
+            _live.OnText = text => Dispatcher.UIThread.Post(() => Transcript = text);
+            _live.OnLevel = (peak, dropped) => Dispatcher.UIThread.Post(() =>
+            {
+                InputLevel = peak;
+                if (dropped > 0) LiveStatus = $"dropped {dropped} frames — the UI is not draining fast enough";
+            });
+            _live.OnError = error => Dispatcher.UIThread.Post(() =>
+            {
+                Status = Describe(error);
+                _ = ToggleRecordingAsync();
+            });
+
+            IsRecording = true;
+            Status = $"Recording from {CaptureDevice?.Name ?? "the default input"}…";
+        }
+        catch (Exception exception) when (exception is AudioCppException
+                                          or InvalidOperationException or DllNotFoundException)
+        {
+            _live?.Dispose();
+            _live = null;
+            IsRecording = false;
+            Status = Describe(exception);
+        }
     }
 
     private Task CancelAsync()

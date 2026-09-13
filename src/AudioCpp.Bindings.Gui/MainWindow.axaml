@@ -232,6 +232,23 @@
 
               <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
 
+              <TextBlock Text="Microphone" Classes="Label" />
+              <Grid ColumnDefinitions="*,8,Auto">
+                <ComboBox Grid.Column="0" ItemsSource="{Binding CaptureDevices}"
+                          SelectedItem="{Binding CaptureDevice}"
+                          HorizontalAlignment="Stretch"
+                          PlaceholderText="system default input" />
+                <Button Grid.Column="2" Classes="Primary" Content="{Binding RecordLabel}"
+                        Command="{Binding RecordCommand}" MinWidth="92" />
+              </Grid>
+              <!-- A meter is how a user knows the mic is live before they discover
+                   the transcript is empty. -->
+              <ProgressBar Value="{Binding InputLevel}" Minimum="0" Maximum="1" Height="4" />
+              <TextBlock Text="{Binding LiveStatus}" Classes="Subtle" FontSize="11"
+                         TextWrapping="Wrap" />
+
+              <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
+
               <TextBlock Text="Declared options — read from the model at runtime. Edit Value to set one; blank uses the model's default."
                          Classes="Subtle" TextWrapping="Wrap" />
               <DataGrid ItemsSource="{Binding Options}" Height="160"
