@@ -114,7 +114,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         RecordCommand = new RelayCommand(
             ToggleRecordingAsync,
-            () => _isRecording || (!_busy && _isLoaded && _task == "asr"));
+            () => _isRecording || (!_busy && _isLoaded && ShowAsrAudioControls));
 
         PlayCommand = new RelayCommand(TogglePlaybackAsync, () => HasPreviewAudio);
         UnloadCommand = new RelayCommand(UnloadAsync, () => _isLoaded && !_busy);
@@ -870,7 +870,31 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public bool SplitLongText { get => _splitLongText; set => Set(ref _splitLongText, value); }
 
     /// <summary>Characters per piece. Defaults per family, as the reference does.</summary>
-    public int ChunkBudget { get => _chunkBudget; set => Set(ref _chunkBudget, value); }
+    /// <summary>
+    /// Characters per synthesis chunk.
+    /// </summary>
+    /// <remarks>
+    /// Loading a model suggests a default for its family, but only while the
+    /// number is still a suggestion. Once it has been set -- typed in, or
+    /// restored from the settings file -- loading a model must not quietly
+    /// replace it, which is what it did: the value was saved faithfully,
+    /// restored faithfully, and then overwritten by the next load.
+    /// </remarks>
+    public int ChunkBudget
+    {
+        get => _chunkBudget;
+        set { if (Set(ref _chunkBudget, value)) _chunkBudgetChosen = true; }
+    }
+
+    private bool _chunkBudgetChosen;
+
+    /// <summary>Suggest a family's default, without overriding a real choice.</summary>
+    private void SuggestChunkBudget(string family)
+    {
+        if (_chunkBudgetChosen) return;
+        _chunkBudget = TextChunker.DefaultBudget(family);
+        Notify(nameof(ChunkBudget));
+    }
 
     /// <summary>
     /// The pieces of the last synthesis, kept rather than only the joined clip:
@@ -1420,7 +1444,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(LoadedModelWeights));
             Notify(nameof(SupportsVoiceReference));
             UnloadCommand.RaiseCanExecuteChanged();
-            ChunkBudget = TextChunker.DefaultBudget(model.Family);
+            SuggestChunkBudget(model.Family);
             IsLoaded = true;
             Status = $"Loaded {model.Family} — {Options.Count} declared option(s), read from the model."
                    + (_vadModel is not null ? $"  VAD: {_vadModel.Family}." : "");
@@ -1459,9 +1483,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // interrupted -- and a Cancel button that silently does nothing is
         // worse than one that is visibly unavailable, because the user waits
         // instead of switching to a smaller model or another backend.
-        _cancellable = Task == "tts"
+        // The same predicates the layout and the request use. Keyed on "tts"
+        // this said a long-text *clone* could not be stopped, though it runs a
+        // call per piece exactly as synthesis does.
+        _cancellable = ShowTextChunking
             ? SplitLongText && TextChunker.Split(Text, Math.Max(1, ChunkBudget)).Count > 1
-            : _vadModel is not null;
+            : ShowAudioInput && _vadModel is not null;
         Notify(nameof(CancelHint));
         CancelCommand.RaiseCanExecuteChanged();
         // Nothing stops the task being switched while a run is in flight, and a
@@ -2569,8 +2596,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var request = new List<KeyValuePair<string, string>>();
 
         // Only for audio tasks, only when this app is not segmenting already, and only
-        // for a family known to implement it.
-        if (Task == "tts" || _vadModel is not null || !UseBuiltInChunking) return (session, request);
+        // for a family known to implement it. "not tts" was the audio test when
+        // there were six tasks; cloning, music generation and voice design read
+        // no audio either, so a clip length would have been read for them too.
+        if (!ShowAudioInput || _vadModel is not null || !UseBuiltInChunking) return (session, request);
         if (_model?.Family != "parakeet_tdt") return (session, request);
         if (seconds < FullContextCeilingSeconds) return (session, request);
 
