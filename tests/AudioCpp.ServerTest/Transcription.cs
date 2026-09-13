@@ -137,6 +137,59 @@ internal static class Transcription
                                           new { model = "asr", audio = "/no/such.wav" });
         Check("a missing file is a 400, not a 500", missing.StatusCode == HttpStatusCode.BadRequest);
 
+        // An upload that is not a WAV at all. The decoder throws on its own
+        // terms, and what matters is that every way it can throw lands in the
+        // handler's 400 filter rather than escaping as a 500: a caller who
+        // uploaded a WEBM should be told the upload was wrong, not that the
+        // server broke.
+        HttpResponseMessage garbage;
+        {
+            using var junkForm = new MultipartFormDataContent();
+            var junk = new ByteArrayContent(Encoding.UTF8.GetBytes("this is not a wav file"));
+            junk.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+            junkForm.Add(junk, "file", "not-audio.wav");
+            junkForm.Add(new StringContent("asr"), "model");
+            garbage = await http.PostAsync("/v1/audio/transcriptions", junkForm);
+        }
+        Check("an upload that is not a WAV is a 400, not a 500",
+              garbage.StatusCode == HttpStatusCode.BadRequest,
+              $"{(int)garbage.StatusCode}");
+
+        // Truncated after a valid RIFF header, which fails further into the
+        // decoder than the one above and on a different exception type.
+        HttpResponseMessage truncated;
+        {
+            using var cutForm = new MultipartFormDataContent();
+            var head = (await File.ReadAllBytesAsync(audio))[..20];
+            var cut = new ByteArrayContent(head);
+            cut.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+            cutForm.Add(cut, "file", "truncated.wav");
+            cutForm.Add(new StringContent("asr"), "model");
+            truncated = await http.PostAsync("/v1/audio/transcriptions", cutForm);
+        }
+        Check("a truncated WAV is a 400, not a 500",
+              truncated.StatusCode == HttpStatusCode.BadRequest,
+              $"{(int)truncated.StatusCode}");
+
+        // Options reach the engine from the multipart form too, not only from
+        // JSON. An option no family declares is the probe: the engine refuses
+        // it by name, which proves the value travelled.
+        HttpResponseMessage multipartOption;
+        {
+            using var optionForm = new MultipartFormDataContent();
+            var bytes = await File.ReadAllBytesAsync(audio);
+            var file = new ByteArrayContent(bytes);
+            file.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+            optionForm.Add(file, "file", Path.GetFileName(audio));
+            optionForm.Add(new StringContent("asr"), "model");
+            optionForm.Add(new StringContent("""{"not_a_real_option":"1"}"""), "options");
+            multipartOption = await http.PostAsync("/v1/audio/transcriptions", optionForm);
+        }
+        var optionBody = await multipartOption.Content.ReadAsStringAsync();
+        Check("multipart options reach the engine",
+              optionBody.Contains("not_a_real_option", StringComparison.Ordinal),
+              optionBody.Length > 160 ? optionBody[..160] : optionBody);
+
         // stream=true on /details is upstream's documented 400: SSE has nowhere
         // to put the detail arrays.
         var streamedDetails = await PostFormAsync("/v1/audio/transcriptions/details", stream: true);

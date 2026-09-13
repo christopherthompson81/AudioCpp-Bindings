@@ -39,18 +39,27 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
     /// Run something with the model itself as well as its session, for a route
     /// that has to ask the model about its own contract.
     /// </summary>
-    public Task<T> UseModelAsync<T>(string id, Func<AudioCppModel, AudioCppSession, T> work,
-                                    CancellationToken cancel = default) =>
-        UseAsync(id, session => work(_loaded[id], session), cancel);
-
-    private readonly Dictionary<string, AudioCppModel> _loaded = new(StringComparer.Ordinal);
-
     /// <summary>
     /// Run something against a model's session, with the model loaded if it is
     /// not already and nothing else using it.
     /// </summary>
-    public async Task<T> UseAsync<T>(string id, Func<AudioCppSession, T> work,
-                                     CancellationToken cancel = default)
+    public Task<T> UseAsync<T>(string id, Func<AudioCppSession, T> work,
+                               CancellationToken cancel = default) =>
+        UseModelAsync(id, (_, session) => work(session), cancel);
+
+    /// <summary>
+    /// As <see cref="UseAsync"/>, for work that has to ask the model what it
+    /// accepts before building the request.
+    /// </summary>
+    /// <remarks>
+    /// The model comes from the entry rather than a lookup table beside it. An
+    /// earlier version kept a dictionary of loaded models to answer this, which
+    /// was a data race: the gate is per model, so two ids loading at once --
+    /// which is exactly what a non-lazy config does on startup -- wrote to one
+    /// unsynchronised dictionary.
+    /// </remarks>
+    public async Task<T> UseModelAsync<T>(string id, Func<AudioCppModel, AudioCppSession, T> work,
+                                          CancellationToken cancel = default)
     {
         var spec = config.Models.FirstOrDefault(m => m.Id == id)
                    ?? throw new KeyNotFoundException($"no model with id '{id}'");
@@ -67,11 +76,10 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
                 entry.Session = entry.Model.CreateSession(
                     spec.Task, spec.Mode,
                     new BackendConfig(config.Backend, config.Device, config.Threads));
-                _loaded[id] = entry.Model;
                 log($"loaded {id} ({entry.Model.Family}) in "
                     + $"{(DateTime.UtcNow - started).TotalMilliseconds:F0} ms");
             }
-            return work(entry.Session);
+            return work(entry.Model!, entry.Session);
         }
         finally
         {

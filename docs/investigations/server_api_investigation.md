@@ -101,3 +101,37 @@ This is a reasonable ABI decision (CLI parity) with a consequence that is not
 visible from the header, and it is worth raising upstream alongside the other
 findings: there is no way to set `transcript.language` without also setting
 `options["language"]`.
+
+## Run 3 — 2026-09-13 17:40 — review of the transcription routes
+
+Not a probe; the findings from reading the branch back before merging, kept
+here because one of them was a bug that no test would have caught until it
+mattered.
+
+**A data race in the model pool.** `UseModelAsync` answered "which model is
+this session's?" from a `Dictionary<string, AudioCppModel>` kept beside the
+pool's `ConcurrentDictionary` of entries. The gate that guards loading is *per
+model id*, so two ids loading at once — which is exactly what a non-lazy config
+does on startup, and what two requests to different models do — wrote to that
+unsynchronised dictionary concurrently. It never failed in testing because the
+test config loads one model.
+
+The table was also unnecessary: `entry.Model` already held the answer inside
+the gate. Removed, and `UseAsync` now delegates to `UseModelAsync` rather than
+the reverse.
+
+**Two gaps in the request parser**, both fixed with tests that fail without
+the fix:
+
+- A malformed upload's route to a 400 was assumed, not demonstrated. It holds —
+  `Wav.Read` throws `InvalidDataException` on a bad magic number and
+  `EndOfStreamException` (an `IOException`) on a truncation, and both are in
+  the handler's filter — but "assumed to hold" is how a 500 gets shipped. Two
+  assertions now cover both shapes.
+- The multipart form silently dropped engine options that the JSON form
+  accepted. Options now ride in one `options` JSON part. Forwarding every
+  unrecognised form field instead would have looked tidier and broken real
+  Whisper clients, which send `response_format`, `temperature` and
+  `timestamp_granularities[]` as a matter of course — the engine rejects
+  options it does not declare, so those would turn a valid request into a
+  failed one.
