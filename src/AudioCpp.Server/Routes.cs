@@ -330,6 +330,194 @@ internal static class Routes
                || !(char.IsLetterOrDigit(error.Message[after]) || error.Message[after] == '_');
     }
 
+    /// <summary>
+    /// Frees the memory a named set of models holds, without forgetting them.
+    /// </summary>
+    /// <remarks>
+    /// Three outcomes, and the difference between the last two is upstream's
+    /// contract rather than an oversight: an unknown id is reported in
+    /// <c>not_found</c>, a known id that was resident is reported in
+    /// <c>unloaded</c>, and a known id that was already idle appears in
+    /// neither. Nothing happened to it and nothing was wrong with asking.
+    /// </remarks>
+    private static async Task<IResult> UnloadModelsAsync(HttpRequest http, ModelPool pool,
+                                                         Action<string> log, CancellationToken cancel)
+    {
+        JsonElement body;
+        try
+        {
+            body = await JsonSerializer.DeserializeAsync<JsonElement>(http.Body, cancellationToken: cancel);
+        }
+        catch (JsonException error)
+        {
+            return Problem(400, "invalid_request_error", $"malformed JSON: {error.Message}");
+        }
+
+        if (!body.TryGetProperty("model_ids", out var ids) || ids.ValueKind != JsonValueKind.Array)
+        {
+            return Problem(400, "invalid_request_error",
+                "request requires a 'model_ids' string array");
+        }
+
+        var unloaded = new List<string>();
+        var notFound = new List<string>();
+        foreach (var element in ids.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.String)
+            {
+                return Problem(400, "invalid_request_error",
+                    "each element of 'model_ids' must be a string");
+            }
+            var id = element.GetString() ?? "";
+            if (!pool.Knows(id)) notFound.Add(id);
+            else if (await pool.UnloadAsync(id, cancel)) unloaded.Add(id);
+        }
+
+        log($"POST /v1/tasks/unload_models  {unloaded.Count} unloaded, {notFound.Count} unknown");
+        return Results.Json(new { unloaded, not_found = notFound });
+    }
+
+    /// <summary>
+    /// The framework's own request shape, for anything the task-specific routes
+    /// do not cover.
+    /// </summary>
+    private static async Task<IResult> RunTaskAsync(HttpRequest http, ModelPool pool,
+                                                    Action<string> log, CancellationToken cancel)
+    {
+        TaskRunRequest request;
+        try
+        {
+            var body = await JsonSerializer.DeserializeAsync<JsonElement>(
+                http.Body, cancellationToken: cancel);
+            request = TaskRunRequest.Parse(body);
+        }
+        catch (Exception error) when (error is JsonException or InvalidDataException
+                                      or IOException or FormatException)
+        {
+            return Problem(400, "invalid_request_error", error.Message);
+        }
+
+        if (!pool.Knows(request.Model))
+        {
+            return Problem(404, "model_not_found", $"no model with id '{request.Model}'");
+        }
+
+        var started = Stopwatch.StartNew();
+        try
+        {
+            var result = await RunWithLanguageAsync(pool, request.Model, request.Language,
+                (session, language) =>
+            {
+                using var task = new AudioCppRequest();
+                request.ApplyTo(task, language);
+                using var output = session.Run(task);
+                return Ran.From(output);
+            }, cancel);
+
+            var wall = started.Elapsed.TotalMilliseconds;
+            log($"POST /v1/tasks/run  {request.Model}  {wall:F0} ms");
+            return Results.Json(result.ToJson(wall, request.Audio?.SampleRate ?? 0));
+        }
+        catch (OperationCanceledException)
+        {
+            return Results.Empty;
+        }
+        catch (AudioCppException error)
+        {
+            log($"POST /v1/tasks/run  {request.Model}  failed: {error.Message}");
+            return Problem(500, "engine_error", error.Message);
+        }
+    }
+
+    private static async Task<IResult> LoadModelAsync(HttpRequest http, ModelPool pool,
+                                                      Action<string> log, CancellationToken cancel)
+    {
+        if (!pool.ManagementEnabled)
+        {
+            return Problem(403, "forbidden", "dynamic model management is disabled");
+        }
+
+        JsonElement body;
+        try
+        {
+            body = await JsonSerializer.DeserializeAsync<JsonElement>(http.Body, cancellationToken: cancel);
+        }
+        catch (JsonException error)
+        {
+            return Problem(400, "invalid_request_error", $"malformed JSON: {error.Message}");
+        }
+
+        string Field(string name) =>
+            body.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString() ?? "" : "";
+
+        var id = Field("id");
+        var path = Field("path");
+        if (id.Length == 0) return Problem(400, "invalid_request_error", "load requires an 'id'");
+        if (path.Length == 0) return Problem(400, "invalid_request_error", "load requires a 'path'");
+
+        var spec = new ServerModel(
+            id,
+            Field("family"),
+            path,
+            Field("task") is { Length: > 0 } task ? task : "tts",
+            Field("mode") is { Length: > 0 } mode ? mode : "offline");
+
+        // Kept so a failed load can put back what was there. Rolling forward
+        // into "forget it" would mean a reconfiguration with a typo in the path
+        // deletes a registration that was working a moment ago.
+        var previous = pool.Spec(id);
+        try
+        {
+            var reconfigured = await pool.RegisterAsync(spec, cancel);
+            // Loaded here rather than left for the first request, because the
+            // caller asked for a load: the point of the route is to pay the
+            // cost now, and reporting loaded:true over a model that has not
+            // been opened would be a lie a client plans around.
+            await pool.LoadAsync(id, cancel);
+            log($"POST /v1/models/load  {id}{(reconfigured ? " (reconfigured)" : "")}");
+            return Results.Json(new { id, loaded = true, reconfigured });
+        }
+        catch (AudioCppException error)
+        {
+            // The registration stands or falls with the load: a model that
+            // cannot be opened must not be left in the list answering
+            // /v1/models and failing every request sent to it. A reconfiguration
+            // goes back to what it was instead of being dropped.
+            if (previous is not null) await pool.RegisterAsync(previous, CancellationToken.None);
+            else await pool.ForgetAsync(id, CancellationToken.None);
+            log($"POST /v1/models/load  {id}  failed: {error.Message}");
+            return Problem(400, "invalid_request_error", error.Message);
+        }
+    }
+
+    private static async Task<IResult> UnloadModelAsync(HttpRequest http, ModelPool pool,
+                                                        Action<string> log, CancellationToken cancel)
+    {
+        if (!pool.ManagementEnabled)
+        {
+            return Problem(403, "forbidden", "dynamic model management is disabled");
+        }
+
+        JsonElement body;
+        try
+        {
+            body = await JsonSerializer.DeserializeAsync<JsonElement>(http.Body, cancellationToken: cancel);
+        }
+        catch (JsonException error)
+        {
+            return Problem(400, "invalid_request_error", $"malformed JSON: {error.Message}");
+        }
+
+        var id = body.TryGetProperty("id", out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? "" : "";
+        if (!pool.Knows(id)) return Problem(404, "not_found", $"unknown model id: {id}");
+
+        await pool.UnloadAsync(id, cancel);
+        log($"POST /v1/models/unload  {id}");
+        return Results.Json(new { id, loaded = false });
+    }
+
     private sealed record Transcribed(
         string Text,
         string Language,
@@ -484,6 +672,29 @@ internal static class Routes
             log($"GET /v1/audio/voices  {(id.Length > 0 ? id : "(unspecified)")}");
             return Results.Json(new { voices = pool.VoicesFor(id) });
         });
+
+        // Residency, which a client managing several models has to be able to
+        // see and change: loading is slow and unloading frees the device.
+        app.MapPost("/v1/tasks/unload_models",
+            (HttpRequest request, CancellationToken cancel) =>
+                UnloadModelsAsync(request, pool, log, cancel));
+        app.MapPost("/v1/tasks/unload_all_models", async (CancellationToken cancel) =>
+        {
+            var unloaded = await pool.UnloadAllAsync(cancel);
+            log($"POST /v1/tasks/unload_all_models  {unloaded.Count} unloaded");
+            return Results.Json(new { unloaded });
+        });
+
+        app.MapPost("/v1/tasks/run",
+            (HttpRequest request, CancellationToken cancel) =>
+                RunTaskAsync(request, pool, log, cancel));
+
+        app.MapPost("/v1/models/load",
+            (HttpRequest request, CancellationToken cancel) =>
+                LoadModelAsync(request, pool, log, cancel));
+        app.MapPost("/v1/models/unload",
+            (HttpRequest request, CancellationToken cancel) =>
+                UnloadModelAsync(request, pool, log, cancel));
 
         // OpenAI's model list shape: clients iterate data[] and read id.
         app.MapGet("/v1/models", () =>

@@ -74,5 +74,19 @@ public sealed record ServerConfig
     /// </remarks>
     public string VoiceDir { get; init; } = "";
 
+    /// <summary>
+    /// Whether a client may add and remove models at runtime, through
+    /// <c>/v1/models/load</c> and <c>/v1/models/unload</c>.
+    /// </summary>
+    /// <remarks>
+    /// Off by default, as upstream has it, and the default is the safe one
+    /// rather than the tidy one: those routes name a filesystem path for the
+    /// server to load, so enabling them on a port that is reachable turns the
+    /// API into a way to read files and spend the machine's memory. A config
+    /// with no models is only valid when this is on, since otherwise the server
+    /// could never serve anything.
+    /// </remarks>
+    public bool UiManagement { get; init; }
+
     public IReadOnlyList<ServerModel> Models { get; init; } = [];
 }
