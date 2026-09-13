@@ -31,12 +31,18 @@
 
           <TextBox Text="{Binding VadModelPath}"
                    PlaceholderText="VAD model (optional) — segments long audio for ASR" />
-          <StackPanel Orientation="Horizontal" Spacing="6">
-            <Button Content="VAD…" Click="OnPickVadModel" />
-            <TextBlock Text="min/max group (s)" VerticalAlignment="Center" Opacity="0.7" />
-            <NumericUpDown Value="{Binding MinSegmentSpan}" Minimum="1" Maximum="60" Width="80" />
-            <NumericUpDown Value="{Binding MaxSegmentSpan}" Minimum="2" Maximum="120" Width="80" />
-          </StackPanel>
+          <Button Content="VAD…" Click="OnPickVadModel" HorizontalAlignment="Left" />
+          <!-- A NumericUpDown needs room for its text as well as its spinner; at 80px
+               the number is squeezed out entirely and only the arrows show. -->
+          <Grid ColumnDefinitions="Auto,8,*,8,*" IsVisible="{Binding HasVadModel}">
+            <TextBlock Grid.Column="0" Text="group (s)" VerticalAlignment="Center" Opacity="0.7" />
+            <NumericUpDown Grid.Column="2" Value="{Binding MinSegmentSpan}"
+                           Minimum="1" Maximum="60" Increment="1" FormatString="0"
+                           MinWidth="110" HorizontalAlignment="Stretch" />
+            <NumericUpDown Grid.Column="4" Value="{Binding MaxSegmentSpan}"
+                           Minimum="2" Maximum="120" Increment="1" FormatString="0"
+                           MinWidth="110" HorizontalAlignment="Stretch" />
+          </Grid>
 
           <Separator Margin="0,6" />
 

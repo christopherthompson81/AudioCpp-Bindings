@@ -83,7 +83,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// Optional Silero VAD model. When set, ASR runs segment-by-segment instead of
     /// handing the whole clip to the model at once.
     /// </summary>
-    public string VadModelPath { get => _vadModelPath; set => Set(ref _vadModelPath, value); }
+    public string VadModelPath
+    {
+        get => _vadModelPath;
+        set { if (Set(ref _vadModelPath, value)) Notify(nameof(HasVadModel)); }
+    }
+
+    /// <summary>The group-span controls only mean anything once a VAD model is set.</summary>
+    public bool HasVadModel => _vadModelPath.Length > 0;
 
     /// <summary>Minimum seconds of speech to accumulate before transcribing a group.</summary>
     public double MinSegmentSpan { get => _minSegmentSpan; set => Set(ref _minSegmentSpan, value); }
@@ -275,7 +282,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                         // Handing a long recording to the model whole means one encoder
                         // graph over the entire clip, which is both the slower path and
                         // the one that runs out of memory on anything lengthy.
-                        RunSegmented(clip, sessionOptions);
+                        transcript = RunSegmented(clip, rows);
                         return;
                     }
                     request.SetAudio(clip.Samples, clip.SampleRate, clip.Channels);
@@ -350,9 +357,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <see cref="MaxSegmentSpan"/> so one unbroken stretch cannot build a huge graph.
     /// Word timings come back relative to each window and are shifted to absolute here.
     /// </summary>
-    private void RunSegmented(
+    private string RunSegmented(
         (float[] Samples, int SampleRate, int Channels) clip,
-        List<KeyValuePair<string, string>> sessionOptions)
+        List<ResultRow> rows)
     {
         if (clip.Channels != 1)
             throw new InvalidOperationException($"VAD needs mono audio, got {clip.Channels} channels.");
@@ -378,9 +385,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var groups = GroupSegments(segments, rate, MinSegmentSpan, MaxSegmentSpan, clip.Samples.Length);
         if (groups.Count == 0)
         {
-            Transcript = "";
-            Status = "VAD found no speech in this file.";
-            return;
+            _segmentedSummary = "VAD found no speech in this file.";
+            return "";
         }
 
         var pieces = new List<string>();
@@ -401,18 +407,18 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (result.Text is { } text && text.Text.Length > 0) pieces.Add(text.Text.Trim());
             foreach (var word in result.Words)
             {
-                Rows.Add(new ResultRow(
+                rows.Add(new ResultRow(
                     "word",
                     $"{(start + word.StartSample) / (double)rate:F2}–{(start + word.EndSample) / (double)rate:F2}s",
                     word.Word,
-                    word.Confidence.ToString("F2")));
+                    word.Confidence.ToString("F3")));
             }
         }
 
-        Transcript = string.Join(" ", pieces);
         var speech = groups.Sum(g => (g.End - g.Start)) / (double)rate;
         _segmentedSummary = $"{groups.Count} group(s) from {segments.Count} VAD segment(s), "
                           + $"{speech:F1}s of speech.";
+        return string.Join(" ", pieces);
     }
 
     private static List<(long Start, long End)> GroupSegments(
