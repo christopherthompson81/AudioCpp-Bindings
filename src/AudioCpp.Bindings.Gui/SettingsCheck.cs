@@ -55,10 +55,11 @@ internal static class SettingsCheck
             //    once something changes.
             var store = new SettingsStore(directory);
             var first = new MainWindowViewModel(store);
-            Console.WriteLine($"no file yet: theme={first.Theme} task={first.Task} threads={first.Threads}");
+            Console.WriteLine($"no file yet: theme={first.Theme} workflow={first.CurrentWorkflow} "
+                              + $"task={first.Task} threads={first.Threads}");
 
             first.Theme = "Dark";
-            first.Task = "tts";
+            first.CurrentWorkflow = "vc";
             first.Backend = "cuda";
             first.Threads = 3;
             first.ChunkBudget = 777;
@@ -77,7 +78,7 @@ internal static class SettingsCheck
             foreach (var (what, got, want) in new (string, object?, object?)[]
                      {
                          ("theme", second.Theme, "Dark"),
-                         ("task", second.Task, "tts"),
+                         ("workflow", second.CurrentWorkflow, "vc"),
                          ("backend", second.Backend, "cuda"),
                          ("threads", second.Threads, 3),
                          ("chunk budget", second.ChunkBudget, 777),
@@ -99,6 +100,16 @@ internal static class SettingsCheck
             var burst = new MainWindowViewModel(new SettingsStore(directory));
             Console.WriteLine($"after 2000 rapid changes: chunk budget={burst.ChunkBudget} (want 2999)");
             if (burst.ChunkBudget != 2999) { Console.Error.WriteLine("the last change was lost"); failures++; }
+
+            // The engine task is not saved — it follows from the workflow and
+            // the model, so a saved one would be a choice the next model
+            // overrules. Restoring the workflow has to leave a task inside it.
+            Console.WriteLine($"  restored workflow {second.CurrentWorkflow} -> task {second.Task}");
+            if (!Workflow.For(second.CurrentWorkflow).Tasks.Contains(second.Task))
+            {
+                Console.Error.WriteLine("the restored task is not in the restored workflow");
+                failures++;
+            }
 
             // 5. Reading settings must not itself write settings: applying a
             //    saved value raises PropertyChanged like any other assignment,
@@ -126,9 +137,9 @@ internal static class SettingsCheck
             // 7. A file from a build that knew fewer settings leaves the rest alone.
             File.WriteAllText(store.StorePath, "{\"Theme\":\"Light\"}");
             var partial = new MainWindowViewModel(new SettingsStore(directory));
-            Console.WriteLine($"  partial file: theme={partial.Theme} task={partial.Task} "
-                              + $"threads={partial.Threads}");
-            if (partial.Theme != "Light" || partial.Task != "asr")
+            Console.WriteLine($"  partial file: theme={partial.Theme} "
+                              + $"workflow={partial.CurrentWorkflow} threads={partial.Threads}");
+            if (partial.Theme != "Light" || partial.CurrentWorkflow != "asr")
             {
                 Console.Error.WriteLine("a partial file did not leave defaults alone"); failures++;
             }

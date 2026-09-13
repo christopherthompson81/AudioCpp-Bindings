@@ -191,12 +191,79 @@
   <data name="label.builtInChunking" xml:space="preserve">
     <value>Built-in chunking (clips over 5 min)</value>
   </data>
-  <!-- Task names. -->
+  <!-- Workflow tabs, and the hero blurb for each. These are the grouping the web UI presents; the task inside one comes from the chosen model. -->
+  <data name="workflow.tts" xml:space="preserve">
+    <value>Text to speech</value>
+  </data>
+  <data name="workflow.asr" xml:space="preserve">
+    <value>ASR / Transcription</value>
+  </data>
+  <data name="workflow.music" xml:space="preserve">
+    <value>Music generation</value>
+  </data>
+  <data name="workflow.vc" xml:space="preserve">
+    <value>Voice conversion</value>
+  </data>
+  <data name="workflow.sep" xml:space="preserve">
+    <value>Source separation</value>
+  </data>
+  <data name="workflow.analysis" xml:space="preserve">
+    <value>Audio analysis</value>
+  </data>
+  <data name="workflow.design" xml:space="preserve">
+    <value>Voice design</value>
+  </data>
+  <data name="studio.title" xml:space="preserve">
+    <value>Audio studio</value>
+  </data>
+  <data name="studio.subtitle.tts" xml:space="preserve">
+    <value>Generate natural speech from text, with voice presets and cloning when supported.</value>
+  </data>
+  <data name="studio.subtitle.asr" xml:space="preserve">
+    <value>Transcribe spoken audio into text, with language and timestamp controls when supported.</value>
+  </data>
+  <data name="studio.subtitle.music" xml:space="preserve">
+    <value>Create music and sound from a prompt, lyrics, or reference audio when supported.</value>
+  </data>
+  <data name="studio.subtitle.vc" xml:space="preserve">
+    <value>Transform a recording into another voice while preserving the spoken or sung performance.</value>
+  </data>
+  <data name="studio.subtitle.sep" xml:space="preserve">
+    <value>Split a recording into vocals, instruments, or other available audio stems.</value>
+  </data>
+  <data name="studio.subtitle.analysis" xml:space="preserve">
+    <value>Analyze audio for speech activity, speakers, timing, and alignment.</value>
+  </data>
+  <data name="studio.subtitle.design" xml:space="preserve">
+    <value>Create or refine a voice from a written description and supported reference controls.</value>
+  </data>
+  <!-- Task names. The hero shows the task of the model that is selected. -->
+  <data name="task.tts" xml:space="preserve">
+    <value>Text to speech</value>
+  </data>
+  <data name="task.clon" xml:space="preserve">
+    <value>Voice cloning</value>
+  </data>
   <data name="task.asr" xml:space="preserve">
     <value>Transcription</value>
   </data>
-  <data name="task.tts" xml:space="preserve">
-    <value>Text to speech</value>
+  <data name="task.gen" xml:space="preserve">
+    <value>Music generation</value>
+  </data>
+  <data name="task.midi" xml:space="preserve">
+    <value>Audio to MIDI</value>
+  </data>
+  <data name="task.vc" xml:space="preserve">
+    <value>Voice conversion</value>
+  </data>
+  <data name="task.svc" xml:space="preserve">
+    <value>Singing voice conversion</value>
+  </data>
+  <data name="task.s2s" xml:space="preserve">
+    <value>Speech editing</value>
+  </data>
+  <data name="task.sep" xml:space="preserve">
+    <value>Source separation</value>
   </data>
   <data name="task.vad" xml:space="preserve">
     <value>Voice activity</value>
@@ -204,39 +271,10 @@
   <data name="task.diar" xml:space="preserve">
     <value>Speaker diarization</value>
   </data>
-  <data name="task.sep" xml:space="preserve">
-    <value>Source separation</value>
-  </data>
   <data name="task.align" xml:space="preserve">
     <value>Forced alignment</value>
   </data>
-  <!-- Task blurbs. Upstream writes one per workflow, not one per task, so the three analysis tasks have no upstream equivalent. -->
-  <data name="studio.subtitle.asr" xml:space="preserve">
-    <value>Transcribe spoken audio into text, with language and timestamp controls when supported.</value>
-  </data>
-  <data name="studio.subtitle.tts" xml:space="preserve">
-    <value>Generate natural speech from text, with voice presets and cloning when supported.</value>
-  </data>
-  <data name="studio.subtitle.sep" xml:space="preserve">
-    <value>Split a recording into vocals, instruments, or other available audio stems.</value>
-  </data>
-  <data name="task.vad.blurb" xml:space="preserve">
-    <value>Find the stretches of a recording that contain speech.</value>
-  </data>
-  <data name="task.diar.blurb" xml:space="preserve">
-    <value>Attribute speech to speakers across a recording.</value>
-  </data>
-  <data name="task.align.blurb" xml:space="preserve">
-    <value>Align a known transcript to the audio it was spoken in.</value>
-  </data>
-  <!-- Task chips. The analysis tasks reuse their plain task name. -->
-  <data name="workflow.asr" xml:space="preserve">
-    <value>ASR / Transcription</value>
-  </data>
-  <data name="workflow.tts" xml:space="preserve">
-    <value>Text to speech</value>
-  </data>
-  <data name="workflow.sep" xml:space="preserve">
-    <value>Source separation</value>
+  <data name="task.vdes" xml:space="preserve">
+    <value>Voice design</value>
   </data>
 </root>

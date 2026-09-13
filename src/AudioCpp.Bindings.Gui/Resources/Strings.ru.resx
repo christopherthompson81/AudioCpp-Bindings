@@ -116,8 +116,17 @@
   <data name="studio.model" xml:space="preserve">
     <value>Модель</value>
   </data>
+  <data name="studio.subtitle.analysis" xml:space="preserve">
+    <value>Анализируйте речевую активность, говорящих, время и выравнивание аудио.</value>
+  </data>
   <data name="studio.subtitle.asr" xml:space="preserve">
     <value>Преобразуйте речь из аудио в текст с настройками языка и временных меток, если они поддерживаются.</value>
+  </data>
+  <data name="studio.subtitle.design" xml:space="preserve">
+    <value>Создавайте и настраивайте голос по текстовому описанию и поддерживаемым эталонным параметрам.</value>
+  </data>
+  <data name="studio.subtitle.music" xml:space="preserve">
+    <value>Создавайте музыку и звуки по описанию, тексту песни или эталонному аудио.</value>
   </data>
   <data name="studio.subtitle.sep" xml:space="preserve">
     <value>Разделяйте запись на вокал, инструменты и другие доступные аудиодорожки.</value>
@@ -125,23 +134,47 @@
   <data name="studio.subtitle.tts" xml:space="preserve">
     <value>Создавайте естественную речь из текста с готовыми голосами и клонированием, если они поддерживаются.</value>
   </data>
+  <data name="studio.subtitle.vc" xml:space="preserve">
+    <value>Преобразуйте запись в другой голос, сохраняя манеру речи или пения.</value>
+  </data>
+  <data name="studio.title" xml:space="preserve">
+    <value>Аудиостудия</value>
+  </data>
   <data name="task.align" xml:space="preserve">
     <value>Принудительное выравнивание</value>
   </data>
   <data name="task.asr" xml:space="preserve">
     <value>Распознавание речи</value>
   </data>
+  <data name="task.clon" xml:space="preserve">
+    <value>Клонирование голоса</value>
+  </data>
   <data name="task.diar" xml:space="preserve">
     <value>Диаризация говорящих</value>
   </data>
+  <data name="task.gen" xml:space="preserve">
+    <value>Генерация музыки</value>
+  </data>
+  <data name="task.s2s" xml:space="preserve">
+    <value>Редактирование речи</value>
+  </data>
   <data name="task.sep" xml:space="preserve">
     <value>Разделение источников</value>
+  </data>
+  <data name="task.svc" xml:space="preserve">
+    <value>Преобразование вокала</value>
   </data>
   <data name="task.tts" xml:space="preserve">
     <value>Синтез речи</value>
   </data>
   <data name="task.vad" xml:space="preserve">
     <value>Голосовая активность</value>
+  </data>
+  <data name="task.vc" xml:space="preserve">
+    <value>Преобразование голоса</value>
+  </data>
+  <data name="task.vdes" xml:space="preserve">
+    <value>Дизайн голоса</value>
   </data>
   <data name="theme.dark" xml:space="preserve">
     <value>Тёмная</value>
@@ -167,13 +200,25 @@
   <data name="voice.reference" xml:space="preserve">
     <value>Эталонный голос</value>
   </data>
+  <data name="workflow.analysis" xml:space="preserve">
+    <value>Анализ аудио</value>
+  </data>
   <data name="workflow.asr" xml:space="preserve">
     <value>ASR / Распознавание</value>
+  </data>
+  <data name="workflow.design" xml:space="preserve">
+    <value>Дизайн голоса</value>
+  </data>
+  <data name="workflow.music" xml:space="preserve">
+    <value>Генерация музыки</value>
   </data>
   <data name="workflow.sep" xml:space="preserve">
     <value>Разделение источников</value>
   </data>
   <data name="workflow.tts" xml:space="preserve">
     <value>Синтез речи</value>
+  </data>
+  <data name="workflow.vc" xml:space="preserve">
+    <value>Преобразование голоса</value>
   </data>
 </root>

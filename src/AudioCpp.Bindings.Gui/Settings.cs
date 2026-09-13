@@ -18,7 +18,11 @@ namespace AudioCpp.Bindings.Gui;
 /// </remarks>
 public sealed record Settings
 {
-    public string? Task { get; init; }
+    /// <summary>
+    /// The workflow tab, not the engine task: the task follows from the model,
+    /// so saving it would restore a choice the next model may overrule.
+    /// </summary>
+    public string? CurrentWorkflow { get; init; }
     public string? Theme { get; init; }
     public string? Language { get; init; }
     public string? Backend { get; init; }

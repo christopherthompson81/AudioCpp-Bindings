@@ -212,9 +212,10 @@
     <ScrollViewer Padding="20,16" IsVisible="{Binding IsStudio}">
       <StackPanel Spacing="16">
 
-        <!-- Task chips. The engine decides what a family supports; these mirror
-             the tasks the ABI exposes rather than the web UI's curated groups. -->
-        <ListBox Classes="Chips" ItemsSource="{Binding TaskChips}"
+        <!-- Workflow tabs, the web UI's grouping: what a person picks between.
+             The engine task follows from the model, and is only asked about
+             where a workflow covers more than one. -->
+        <ListBox Classes="Chips" ItemsSource="{Binding WorkflowChips}"
                  SelectedItem="{Binding SelectedChip}"
                  Background="Transparent" BorderThickness="0" Padding="0">
           <ListBox.ItemsPanel>
@@ -223,7 +224,7 @@
             </ItemsPanelTemplate>
           </ListBox.ItemsPanel>
           <ListBox.ItemTemplate>
-            <DataTemplate x:DataType="vm:TaskChip">
+            <DataTemplate x:DataType="vm:WorkflowChip">
               <Grid ColumnDefinitions="Auto,16,Auto">
                 <TextBlock Grid.Column="0" Text="{Binding Title}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Text="{Binding Count}" Classes="Subtle"
@@ -238,8 +239,8 @@
           <StackPanel Grid.Column="0" Spacing="4">
             <TextBlock Text="{Binding [studio.eyebrow], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow"
                        Foreground="{DynamicResource AppAccent}" />
-            <TextBlock Text="{Binding TaskTitle}" Classes="Hero" />
-            <TextBlock Text="{Binding TaskBlurb}" Classes="Subtle" FontSize="13" />
+            <TextBlock Text="{Binding StudioTitle}" Classes="Hero" />
+            <TextBlock Text="{Binding StudioBlurb}" Classes="Subtle" FontSize="13" />
           </StackPanel>
 
           <Border Grid.Column="1" Classes="Card" Padding="18,14" MinWidth="300"
@@ -373,6 +374,20 @@
                   <TextBlock Text="{Binding TaskBadge}" Classes="Eyebrow" />
                 </Border>
               </Grid>
+
+              <!-- Which task inside the workflow. Hidden where the workflow has
+                   only one, and normally settled by the chosen model; a model
+                   loaded from a path has no catalogue entry to ask, so the
+                   choice stays reachable. -->
+              <StackPanel IsVisible="{Binding ShowTaskChoice}" Spacing="6">
+                <ListBox Classes="Chips" ItemsSource="{Binding WorkflowTaskNames}"
+                         SelectedIndex="{Binding SelectedTaskIndex}"
+                         Background="Transparent" BorderThickness="0" Padding="0">
+                  <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                  </ListBox.ItemsPanel>
+                </ListBox>
+              </StackPanel>
 
               <StackPanel Spacing="10" IsVisible="{Binding ShowText}">
                 <TextBlock Text="{Binding [request.text], Source={x:Static res:Loc.Current}}" Classes="Label" />
