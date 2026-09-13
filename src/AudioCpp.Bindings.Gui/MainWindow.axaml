@@ -372,6 +372,42 @@
                     </DataGrid.Columns>
                   </DataGrid>
                 </TabItem>
+                <TabItem Header="Streams" IsVisible="{Binding OutputStreams.Count}">
+                  <!-- Separation returns one buffer per stem; a single waveform
+                       would hide all but the first. -->
+                  <ItemsControl ItemsSource="{Binding OutputStreams}" Height="300">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:NamedAudioEntry">
+                        <Border Classes="Card" Padding="12" Margin="0,0,0,8">
+                          <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel Grid.Column="0" Spacing="2">
+                              <TextBlock Text="{Binding Id}" Classes="Label" />
+                              <TextBlock Text="{Binding Summary}" Classes="Subtle" FontSize="11" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="Save…"
+                                    Click="OnSaveStream" Tag="{Binding}" />
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </TabItem>
+                <TabItem Header="Artifacts" IsVisible="{Binding Artifacts.Count}">
+                  <ItemsControl ItemsSource="{Binding Artifacts}" Height="300">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:ArtifactEntry">
+                        <Border Classes="Card" Padding="12" Margin="0,0,0,8">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="{Binding Id}" Classes="Label" />
+                            <TextBlock Text="{Binding Summary}" Classes="Subtle" FontSize="11" />
+                            <TextBox Text="{Binding Preview}" IsReadOnly="True" MaxHeight="150"
+                                     AcceptsReturn="True" TextWrapping="Wrap" FontSize="11" />
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </TabItem>
                 <TabItem Header="JSON">
                   <TextBox Text="{Binding ResultJson}" IsReadOnly="True" AcceptsReturn="True"
                            TextWrapping="NoWrap" Height="300" FontSize="12"
@@ -388,9 +424,14 @@
               <vm:WaveformView Height="90" Samples="{Binding OutputSamples}"
                                Progress="{Binding PlayProgress}"
                                Seek="{Binding SeekTo}" />
-              <StackPanel Orientation="Horizontal" Spacing="12">
+              <TextBlock Text="{Binding TimingBreakdown}" Classes="Subtle" FontSize="11" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Content="{Binding PlayLabel}" Command="{Binding PlayCommand}" MinWidth="76" />
                 <Button Content="Save WAV…" Command="{Binding SaveWavCommand}" />
+                <!-- A transcript with word timings is a subtitle track that has
+                     not been cut into lines yet. -->
+                <Button Content="SRT…" Command="{Binding SaveSrtCommand}" />
+                <Button Content="VTT…" Command="{Binding SaveVttCommand}" />
                 <TextBlock Text="{Binding PlayStatus}" Classes="Subtle" VerticalAlignment="Center" />
                 <TextBlock Text="{Binding OutputSummary}" Classes="Subtle"
                            VerticalAlignment="Center" />

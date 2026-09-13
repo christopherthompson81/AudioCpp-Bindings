@@ -53,6 +53,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private double _playProgress = -1;
     private ResultRow? _selectedRow;
     private bool _showAllOptions;
+    private readonly List<(string Word, long StartSample, long EndSample)> _words = [];
+    private int _resultSampleRate = 16000;
+    private string _timingBreakdown = "";
     private string _playStatus = "";
     private string _task = "asr";
     private string _audioPath = "";
@@ -96,6 +99,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         PlayCommand = new RelayCommand(TogglePlaybackAsync, () => HasPreviewAudio);
         UnloadCommand = new RelayCommand(UnloadAsync, () => _isLoaded && !_busy);
+        SaveSrtCommand = new RelayCommand(() => SaveSubtitlesAsync("srt"), () => HasWordTimings);
+        SaveVttCommand = new RelayCommand(() => SaveSubtitlesAsync("vtt"), () => HasWordTimings);
 
         LoadCatalog();
         LoadCaptureDevices();
@@ -294,6 +299,32 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public ObservableCollection<DeclaredOption> RequestOptions { get; } = [];
 
     public ObservableCollection<DeclaredOption> SessionOptions { get; } = [];
+
+    /// <summary>Audio streams a run produced, each separately playable and saveable.</summary>
+    public ObservableCollection<NamedAudioEntry> OutputStreams { get; } = [];
+
+    /// <summary>Non-audio outputs a run produced — alignments, tokens, whatever a family emits.</summary>
+    public ObservableCollection<ArtifactEntry> Artifacts { get; } = [];
+
+    /// <summary>True when the result carries word timings, so subtitles can be exported.</summary>
+    public bool HasWordTimings => _words.Count > 0;
+
+    /// <summary>
+    /// Where the time went.
+    /// </summary>
+    /// <remarks>
+    /// Measured here, not reported by the engine: the ABI exposes nothing about
+    /// timing, so these are this app's own stopwatches around load, session
+    /// construction and the run itself. Useful for telling "the model is slow"
+    /// apart from "loading it is slow", which are different problems.
+    /// </remarks>
+    public string TimingBreakdown { get => _timingBreakdown; private set => Set(ref _timingBreakdown, value); }
+
+    /// <summary>Save the transcript as SubRip.</summary>
+    public RelayCommand SaveSrtCommand { get; }
+
+    /// <summary>Save the transcript as WebVTT.</summary>
+    public RelayCommand SaveVttCommand { get; }
 
     /// <summary>Show every declared option as a raw grid, not just typed controls.</summary>
     public bool ShowAllOptions
@@ -720,6 +751,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Status = "Running…";
         Rows.Clear();
         Transcript = "";
+        _words.Clear();
+        OutputStreams.Clear();
+        Artifacts.Clear();
+        TimingBreakdown = "";
         _outputSamples = null;
         ResetPlayer();
         _cancel = new CancellationTokenSource();
@@ -728,6 +763,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             var started = DateTime.UtcNow;
             var rows = new List<ResultRow>();
+            var words = new List<(string Word, long StartSample, long EndSample)>();
+            var streams = new List<NamedAudioEntry>();
+            var artifacts = new List<ArtifactEntry>();
+            var sessionMs = 0L;
+            var runMs = 0L;
             string transcript = "";
 
             await System.Threading.Tasks.Task.Run(() =>
@@ -764,6 +804,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 // does nothing.
                 var key = $"{Task}|{Backend}|{Threads}|"
                         + string.Join(";", sessionOptions.Select(o => $"{o.Key}={o.Value}"));
+                var sessionStarted = System.Diagnostics.Stopwatch.StartNew();
                 if (_session is null || _sessionKey != key)
                 {
                     _session?.Dispose();
@@ -772,6 +813,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                         sessionOptions.Count > 0 ? sessionOptions : null);
                     _sessionKey = key;
                 }
+                sessionMs = sessionStarted.ElapsedMilliseconds;
 
                 using var request = new AudioCppRequest();
                 foreach (var option in chunking.Request)
@@ -821,7 +863,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     if (Task == "align" && Text.Length > 0) request.SetText(Text, "en-us");
                 }
 
+                var runStarted = System.Diagnostics.Stopwatch.StartNew();
                 using var result = _session!.Run(request);
+                runMs = runStarted.ElapsedMilliseconds;
 
                 if (result.Text is { } text)
                 {
@@ -850,20 +894,41 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     rows.Add(new ResultRow("word", Span(word.StartSample, word.EndSample),
                         word.Word, word.Confidence.ToString("F3"),
                         word.StartSample, word.EndSample));
+                    words.Add((word.Word, word.StartSample, word.EndSample));
                 }
                 foreach (var stream in result.NamedAudio)
                 {
                     rows.Add(new ResultRow("stream", $"{stream.Duration:F2}s", stream.Id,
                         $"{stream.SampleRate} Hz"));
+                    streams.Add(new NamedAudioEntry(
+                        stream.Id, stream.Samples, stream.SampleRate, stream.Channels));
                 }
                 foreach (var artifact in result.Artifacts)
                 {
                     rows.Add(new ResultRow("artifact", $"{artifact.Payload.Length} B",
                         artifact.Id, artifact.Kind.ToString()));
+                    artifacts.Add(new ArtifactEntry(
+                        artifact.Id, artifact.Kind.ToString(), artifact.Payload,
+                        string.Join(", ", artifact.Metadata.Select(m => $"{m.Key}={m.Value}"))));
                 }
             });
 
             _lastRunSeconds = (DateTime.UtcNow - started).TotalSeconds;
+
+            _words.Clear();
+            _words.AddRange(words);
+            OutputStreams.Clear();
+            foreach (var stream in streams) OutputStreams.Add(stream);
+            Artifacts.Clear();
+            foreach (var artifact in artifacts) Artifacts.Add(artifact);
+
+            TimingBreakdown = sessionMs > 0
+                ? $"session {sessionMs} ms · run {runMs} ms · total {_lastRunSeconds * 1000:F0} ms"
+                : $"run {runMs} ms · total {_lastRunSeconds * 1000:F0} ms";
+
+            Notify(nameof(HasWordTimings));
+            SaveSrtCommand.RaiseCanExecuteChanged();
+            SaveVttCommand.RaiseCanExecuteChanged();
             Notify(nameof(RunState));
             Notify(nameof(HasPreviewAudio));
             PlayCommand.RaiseCanExecuteChanged();
@@ -1491,6 +1556,64 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return System.Threading.Tasks.Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Write the transcript as subtitles, grouped from word timings.
+    /// </summary>
+    /// <remarks>
+    /// The sample rate is the input's, not the output's: word offsets are
+    /// positions in the audio that was transcribed, and using an output rate
+    /// here would shift every cue.
+    /// </remarks>
+    private async Task SaveSubtitlesAsync(string format)
+    {
+        if (_words.Count == 0 || PickSavePath is null) return;
+
+        var path = await PickSavePath($"transcript.{format}");
+        if (path is null) return;
+
+        try
+        {
+            var rate = _inputClip?.SampleRate ?? _resultSampleRate;
+            var cues = Subtitles.Group(_words, rate);
+            var text = format == "vtt" ? Subtitles.ToVtt(cues) : Subtitles.ToSrt(cues);
+            await File.WriteAllTextAsync(path, text);
+            Status = $"Wrote {cues.Count} cue(s) to {path}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Status = Describe(exception);
+        }
+    }
+
+    /// <summary>
+    /// The subtitle text a save would write. Exposed so the grouping can be
+    /// checked without driving a file dialog.
+    /// </summary>
+    public string SubtitlePreview(string format)
+    {
+        var rate = _inputClip?.SampleRate ?? _resultSampleRate;
+        var cues = Subtitles.Group(_words, rate);
+        return format == "vtt" ? Subtitles.ToVtt(cues) : Subtitles.ToSrt(cues);
+    }
+
+    /// <summary>Write one of a run's named streams, for a separation result's stems.</summary>
+    public async Task SaveStreamAsync(NamedAudioEntry stream)
+    {
+        if (PickSavePath is null) return;
+        var path = await PickSavePath($"{stream.Id}.wav");
+        if (path is null) return;
+
+        try
+        {
+            Wav.Write(path, stream.Samples, stream.SampleRate, stream.Channels);
+            Status = $"Wrote {path}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Status = Describe(exception);
+        }
+    }
+
     private async Task SaveWavAsync()
     {
         if (_outputSamples is null || PickSavePath is null) return;
@@ -1803,6 +1926,38 @@ public sealed class DeclaredOption(
 /// Formatting the offsets and discarding them is what made the rows
 /// unactionable in the first place; -1 means the row has no position.
 /// </param>
+/// <summary>One audio stream a run produced, beyond the single main output.</summary>
+public sealed record NamedAudioEntry(string Id, float[] Samples, int SampleRate, int Channels)
+{
+    public double Seconds => SampleRate > 0 && Channels > 0
+        ? (double)Samples.Length / Channels / SampleRate : 0;
+
+    public string Summary => $"{Seconds:F2}s · {SampleRate} Hz · {Channels}ch";
+}
+
+/// <summary>One non-audio output, with whatever the family attached to it.</summary>
+public sealed record ArtifactEntry(string Id, string Kind, byte[] Payload, string Metadata)
+{
+    public string Summary => $"{Kind} · {Payload.Length} bytes"
+                             + (Metadata.Length > 0 ? $" · {Metadata}" : "");
+
+    /// <summary>Text artifacts are worth showing inline; binary ones are not.</summary>
+    public string Preview
+    {
+        get
+        {
+            if (Payload.Length == 0) return "";
+            // A payload with no control bytes beyond whitespace is text worth showing.
+            foreach (var b in Payload.Take(512))
+            {
+                if (b < 0x09 || (b > 0x0D && b < 0x20)) return "(binary)";
+            }
+            var text = System.Text.Encoding.UTF8.GetString(Payload);
+            return text.Length > 2000 ? text[..2000] + "…" : text;
+        }
+    }
+}
+
 /// <summary>Which control suits a declared option.</summary>
 public enum OptionEditor { Choice, Toggle, Slider, Number, Text }
 
