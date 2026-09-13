@@ -15,6 +15,13 @@ internal static class Program
             return Smoke.RunAsync(args.Skip(1).ToArray()).GetAwaiter().GetResult();
         }
 
+        // Settings round-trip, in a scratch directory so a check never writes
+        // over the settings of the person running it.
+        if (args.Contains("--settings-check"))
+        {
+            return SettingsCheck.Run();
+        }
+
         // Pure logic, so it runs without a display. The save dialog itself
         // cannot be driven headlessly; what broke was the mapping in front of
         // it, and that can be.

@@ -39,9 +39,7 @@ public sealed class VoiceLibrary
 
     public VoiceLibrary(string? directory = null)
     {
-        var root = directory ?? System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "audiocpp-studio");
+        var root = directory ?? AppData.Root(Environment.SpecialFolder.ApplicationData);
         Directory.CreateDirectory(root);
         _path = System.IO.Path.Combine(root, "voices.json");
     }
