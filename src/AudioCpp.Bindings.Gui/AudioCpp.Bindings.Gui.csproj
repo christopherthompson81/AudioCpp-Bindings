@@ -26,6 +26,9 @@
     <EmbeddedResource Update="Resources/Strings.resx">
       <LogicalName>AudioCpp.Bindings.Gui.Resources.Strings.resources</LogicalName>
     </EmbeddedResource>
+    <!-- The pseudo-locale is a development aid. Keeping it out of Release stops
+         a satellite assembly of accented English shipping to users. -->
+    <EmbeddedResource Remove="Resources/Strings.qps-ploc.resx" Condition="'$(Configuration)' == 'Release'" />
   </ItemGroup>
 
   <ItemGroup>
