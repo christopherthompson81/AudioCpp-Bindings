@@ -101,6 +101,21 @@ internal static class LiveCheck
                     }
                 }
 
+                if (args.Contains("--shot"))
+                {
+                    // Screenshot each task so the control layout can be compared.
+                    // One task, held open: capturing a rotating set meant guessing
+                    // when each frame was up, and the guesses kept landing wrong.
+                    var task = args.FirstOrDefault(a => a.StartsWith("task="))?["task=".Length..] ?? "asr";
+                    viewModel.Task = task;
+                    await Task.Delay(400);
+                    Console.WriteLine($"{task}: text={viewModel.ShowText} voice={viewModel.ShowVoice} "
+                                      + $"audio={viewModel.ShowAudioInput} asrExtras={viewModel.ShowAsrAudioControls} "
+                                      + $"split={viewModel.ShowTextChunking}");
+                    await Task.Delay(60000);   // held for a screenshot; killed externally
+                    return;
+                }
+
                 if (args.Contains("--play-check"))
                 {
                     // Load and run once so there is audio to preview: the input

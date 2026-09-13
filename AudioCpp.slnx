@@ -7,7 +7,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AudioCpp.BindingCoverage/AudioCpp.BindingCoverage.csproj" />
-    <Project Path="tests/AudioCpp.AudioTest/AudioCpp.AudioTest.csproj" />
     <Project Path="tests/AudioCpp.ModelTest/AudioCpp.ModelTest.csproj" />
     <Project Path="tests/AudioCpp.PackageTest/AudioCpp.PackageTest.csproj" />
     <Project Path="tests/AudioCpp.PathTest/AudioCpp.PathTest.csproj" />

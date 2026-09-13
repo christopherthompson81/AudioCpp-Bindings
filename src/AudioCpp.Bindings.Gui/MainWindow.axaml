@@ -164,6 +164,7 @@
 
               <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,4" />
 
+              <StackPanel Spacing="10" IsVisible="{Binding ShowAsrAudioControls}">
               <TextBlock Text="LONG AUDIO" Classes="Eyebrow" />
               <CheckBox IsChecked="{Binding UseBuiltInChunking}"
                         IsEnabled="{Binding !HasVadModel}"
@@ -188,6 +189,7 @@
                 <NumericUpDown Grid.Column="4" Value="{Binding MaxSegmentSpan}" Minimum="2"
                                Maximum="120" Increment="1" FormatString="0" MinWidth="100" />
               </Grid>
+              </StackPanel>
             </StackPanel>
           </Border>
 
@@ -205,11 +207,13 @@
                 </Border>
               </Grid>
 
-              <TextBlock Text="Text" Classes="Label" />
-              <TextBox Text="{Binding Text}" AcceptsReturn="True" Height="110"
-                       TextWrapping="Wrap" PlaceholderText="Enter the text…" />
+              <StackPanel Spacing="10" IsVisible="{Binding ShowText}">
+                <TextBlock Text="Text" Classes="Label" />
+                <TextBox Text="{Binding Text}" AcceptsReturn="True" Height="110"
+                         TextWrapping="Wrap" PlaceholderText="Enter the text…" />
+              </StackPanel>
 
-              <Grid ColumnDefinitions="*,Auto">
+              <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowTextChunking}">
                 <CheckBox Grid.Column="0" IsChecked="{Binding SplitLongText}"
                           Content="Split and merge long text" VerticalAlignment="Center" />
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
@@ -220,16 +224,20 @@
                 </StackPanel>
               </Grid>
 
-              <TextBlock Text="Voice id" Classes="Label" />
-              <TextBox Text="{Binding VoiceId}" PlaceholderText="optional, e.g. af_heart" />
+              <StackPanel Spacing="10" IsVisible="{Binding ShowVoice}">
+                <TextBlock Text="Voice id" Classes="Label" />
+                <TextBox Text="{Binding VoiceId}" PlaceholderText="optional, e.g. af_heart" />
+              </StackPanel>
 
-              <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
+              <StackPanel Spacing="10" IsVisible="{Binding ShowAudioInput}">
+                <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
+                <TextBlock Text="Audio input" Classes="Label" />
+                <TextBox Text="{Binding AudioPath}"
+                         PlaceholderText="input WAV" />
+                <Button Content="Audio…" Click="OnPickAudio" HorizontalAlignment="Left" />
+              </StackPanel>
 
-              <TextBlock Text="Audio input" Classes="Label" />
-              <TextBox Text="{Binding AudioPath}"
-                       PlaceholderText="input WAV (asr / vad / diar / sep)" />
-              <Button Content="Audio…" Click="OnPickAudio" HorizontalAlignment="Left" />
-
+              <StackPanel Spacing="10" IsVisible="{Binding ShowAsrAudioControls}">
               <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
 
               <TextBlock Text="Microphone" Classes="Label" />
@@ -246,6 +254,7 @@
               <ProgressBar Value="{Binding InputLevel}" Minimum="0" Maximum="1" Height="4" />
               <TextBlock Text="{Binding LiveStatus}" Classes="Subtle" FontSize="11"
                          TextWrapping="Wrap" />
+              </StackPanel>
 
               <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
 
