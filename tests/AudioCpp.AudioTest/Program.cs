@@ -116,11 +116,42 @@ internal static class Program
                 failures++;
             }
 
+            // The guarantee is that the position stops moving once paused. It
+            // is not that it still reads whatever it read a moment ago: the
+            // clip was playing in between, so it may legitimately have
+            // advanced. Comparing against the earlier reading is what made this
+            // check fail once in a dozen runs, and only under load.
+            //
+            // The reading is taken after a settle, not immediately. The device
+            // is deliberately left running -- starting one clips the head of
+            // every play -- so pause takes effect when the callback next sees
+            // the flag, up to a buffer period later. Reading before that has
+            // its own race, narrow enough that a few dozen runs would not find
+            // it and wide enough to fail eventually, which is the shape of the
+            // bug being fixed here.
             player.Pause();
-            Thread.Sleep(200);
-            if (player.Position != advanced)
+            Thread.Sleep(60);
+            var paused = player.Position;
+            if (paused < advanced)
             {
-                Console.Error.WriteLine($"  paused playback advanced: {advanced} -> {player.Position}");
+                Console.Error.WriteLine($"  pause went backwards: {advanced} -> {paused}");
+                failures++;
+            }
+
+            Thread.Sleep(200);
+            if (player.Position != paused)
+            {
+                Console.Error.WriteLine($"  paused playback advanced: {paused} -> {player.Position}");
+                failures++;
+            }
+
+            // Resuming carries on from the pause rather than restarting or
+            // rewinding.
+            player.Play();
+            player.Pause();
+            if (player.Position < paused)
+            {
+                Console.Error.WriteLine($"  resume went backwards: {paused} -> {player.Position}");
                 failures++;
             }
 
