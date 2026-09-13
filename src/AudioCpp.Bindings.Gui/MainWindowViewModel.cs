@@ -1103,6 +1103,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             }
             request.SetText(piece, "en-us");
             if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
+            // Every piece needs the reference, not just the first: each is its
+            // own request, and a piece without one comes back in a different
+            // voice from its neighbours.
+            ApplyVoiceReference(request);
 
             using var result = _session!.Run(request);
             if (result.Audio is not { } audio) continue;
