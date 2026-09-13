@@ -61,14 +61,17 @@
 
           <Separator Margin="0,6" />
 
-          <CheckBox IsChecked="{Binding UseBuiltInChunking}"
-                    Content="Built-in VAD chunking" />
-          <StackPanel Orientation="Horizontal" Spacing="6" IsEnabled="{Binding UseBuiltInChunking}">
+          <!-- Engine-side chunking, as opposed to the VAD model above, which makes this
+               app do the segmenting. The two are alternatives, so setting one disables
+               the other rather than leaving a control that silently does nothing. -->
+          <CheckBox IsChecked="{Binding UseBuiltInChunking}" IsEnabled="{Binding !HasVadModel}"
+                    Content="Built-in chunking (clips over 5 min)" />
+          <StackPanel Orientation="Horizontal" Spacing="6" IsEnabled="{Binding ChunkingApplies}">
             <TextBlock Text="chunk s" VerticalAlignment="Center" Opacity="0.7" />
             <NumericUpDown Value="{Binding ChunkSeconds}" Minimum="1" Maximum="60"
                            Increment="1" FormatString="0" Width="110" />
           </StackPanel>
-          <TextBox Text="{Binding VadAssetPath}" IsEnabled="{Binding UseBuiltInChunking}"
+          <TextBox Text="{Binding VadAssetPath}" IsEnabled="{Binding ChunkingApplies}"
                    PlaceholderText="silero_vad dir (blank = search)" />
 
           <Separator Margin="0,6" />

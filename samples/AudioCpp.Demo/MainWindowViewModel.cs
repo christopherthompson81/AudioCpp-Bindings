@@ -81,7 +81,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public int Threads { get => _threads; set => Set(ref _threads, value); }
 
     /// <summary>Let the engine segment on speech rather than handing it the whole clip.</summary>
-    public bool UseBuiltInChunking { get => _useBuiltInChunking; set => Set(ref _useBuiltInChunking, value); }
+    public bool UseBuiltInChunking
+    {
+        get => _useBuiltInChunking;
+        set { if (Set(ref _useBuiltInChunking, value)) Notify(nameof(ChunkingApplies)); }
+    }
+
+    /// <summary>
+    /// Whether the chunking controls can do anything: the preset only engages past
+    /// <see cref="FullContextCeilingSeconds"/>, and a VAD model set above means this app
+    /// segments instead. Without this the window offers a toggle that silently does
+    /// nothing on a short clip.
+    /// </summary>
+    public bool ChunkingApplies => _useBuiltInChunking && !HasVadModel;
 
     /// <summary>Seconds per chunk. The engine's own default of 2 slices mid-utterance.</summary>
     public double ChunkSeconds { get => _chunkSeconds; set => Set(ref _chunkSeconds, value); }
@@ -98,7 +110,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public string VadModelPath
     {
         get => _vadModelPath;
-        set { if (Set(ref _vadModelPath, value)) Notify(nameof(HasVadModel)); }
+        set
+        {
+            if (!Set(ref _vadModelPath, value)) return;
+            Notify(nameof(HasVadModel));
+            Notify(nameof(ChunkingApplies));
+        }
     }
 
     /// <summary>The group-span controls only mean anything once a VAD model is set.</summary>
@@ -530,27 +547,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Options that put the engine's own VAD chunking in charge of a long recording.
-    /// </summary>
-    /// <remarks>
-    /// Measured on a 10-minute clip: 3.6s at 89.7% agreement against an F32 reference,
-    /// against 35s at 90.9% for segmenting in this app and calling ASR per group, and
-    /// 66.3% for the engine's defaults — its audio_chunk_duration_sec defaults to 2s,
-    /// which slices mid-utterance.
-    ///
-    /// offline_mode=long_form is load-bearing and not obviously so. The engine sizes the
-    /// encoder graph in prepare(), which consults offline_mode but not audio_chunk_mode,
-    /// so asking for vad chunking alone still sizes the graph for the whole recording and
-    /// throws on anything past the full-context ceiling. long_form makes prepare() agree
-    /// with the path the run will take.
-    ///
-    /// Hardcoded per family rather than discovered, which is the exception to how the
-    /// rest of this window works. The shipped Parakeet GGUF embeds a model spec predating
-    /// these controls, so it advertises neither them nor offline_mode — the options
-    /// function, they are simply absent from what the model says about itself. Drop this
-    /// once the package is regenerated and the Options grid will carry them on its own.
-    /// </remarks>
-    /// <summary>
     /// Clip length past which the engine's own path cannot cope, so the preset takes over.
     /// </summary>
     /// <remarks>
@@ -566,6 +562,29 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// </remarks>
     private const double FullContextCeilingSeconds = 300;
 
+    /// <summary>
+    /// Options that put the engine's own VAD chunking in charge of a long recording.
+    /// </summary>
+    /// <remarks>
+    /// Measured on a 10-minute clip, CUDA: 5.7s and 1483 words, against 35s for
+    /// segmenting in this app and calling ASR per group, and an outright failure for the
+    /// engine's untouched defaults.
+    ///
+    /// audio_chunk_duration_sec is set because the engine's own default of 2s slices
+    /// mid-utterance badly enough to lose words.
+    ///
+    /// offline_mode=long_form is load-bearing and not obviously so. The engine sizes the
+    /// encoder graph in prepare(), which consults offline_mode but not audio_chunk_mode,
+    /// so asking for vad chunking alone still sizes the graph for the whole recording and
+    /// throws on anything past the full-context ceiling. long_form makes prepare() agree
+    /// with the path the run will take.
+    ///
+    /// Hardcoded per family rather than discovered, which is the exception to how the
+    /// rest of this window works. The shipped Parakeet GGUF embeds a model spec predating
+    /// these controls, so it advertises neither them nor offline_mode — the options
+    /// function, they are simply absent from what the model says about itself. Drop this
+    /// once the package is regenerated and the Options grid will carry them on its own.
+    /// </remarks>
     private (List<KeyValuePair<string, string>> Session, List<KeyValuePair<string, string>> Request)
         ChunkingPreset(double seconds)
     {
