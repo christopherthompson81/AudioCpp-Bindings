@@ -52,6 +52,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private DispatcherTimer? _playTimer;
     private double _playProgress = -1;
     private ResultRow? _selectedRow;
+    private bool _showAllOptions;
     private string _playStatus = "";
     private string _task = "asr";
     private string _audioPath = "";
@@ -280,6 +281,22 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     /// <summary>Whatever the loaded family declares, read at runtime rather than hardcoded.</summary>
     public ObservableCollection<DeclaredOption> Options { get; } = [];
+
+    /// <summary>
+    /// Per-run options, as typed controls. Separated from session options
+    /// because changing one of those rebuilds the session, which is a different
+    /// promise to make to a user mid-experiment.
+    /// </summary>
+    public ObservableCollection<DeclaredOption> RequestOptions { get; } = [];
+
+    public ObservableCollection<DeclaredOption> SessionOptions { get; } = [];
+
+    /// <summary>Show every declared option as a raw grid, not just typed controls.</summary>
+    public bool ShowAllOptions
+    {
+        get => _showAllOptions;
+        set => Set(ref _showAllOptions, value);
+    }
     public ObservableCollection<ResultRow> Rows { get; } = [];
 
     public string ModelPath
@@ -624,8 +641,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                         option.MinValue.Length > 0 || option.MaxValue.Length > 0
                             ? $"[{option.MinValue},{option.MaxValue}]"
                             : "",
-                        option.Required));
+                        option.Required, option.Description, option.MinValue, option.MaxValue));
                 }
+            }
+
+            RequestOptions.Clear();
+            SessionOptions.Clear();
+            foreach (var option in Options)
+            {
+                (option.Scope == nameof(AudioCppOptionScope.Request)
+                    ? RequestOptions : SessionOptions).Add(option);
             }
 
             for (var i = 0; i < TaskChips.Count; i++)
@@ -1578,7 +1603,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 /// and the model's own default applies.
 /// </summary>
 public sealed class DeclaredOption(
-    string scope, string name, string type, string @default, string range, bool required)
+    string scope, string name, string type, string @default, string range, bool required,
+    string description = "", string min = "", string max = "")
     : INotifyPropertyChanged
 {
     private string _value = "";
@@ -1589,6 +1615,84 @@ public sealed class DeclaredOption(
     public string Default { get; } = @default;
     public string Range { get; } = range;
     public bool Required { get; } = required;
+
+    /// <summary>What the model says the option is for; shown as a tooltip.</summary>
+    public string Description { get; } = description;
+
+    public string Min { get; } = min;
+    public string Max { get; } = max;
+
+    /// <summary>
+    /// Which editor suits this option, worked out from what the model declares
+    /// rather than from a curated list.
+    /// </summary>
+    /// <remarks>
+    /// audio.cpp ships webui/configs/model_params.json with hand-written
+    /// controls, but it is TTS-specific by its own description, covers 48 of the
+    /// 77 families, carries part-Chinese labels, and has no entry at all for
+    /// parakeet_tdt -- the ASR model this app is most used with. The ABI already
+    /// reports type, default, min, max and a description for every option of
+    /// every family, so the editors are derived from that instead. It works
+    /// everywhere and cannot drift from the engine.
+    /// </remarks>
+    public OptionEditor Editor => Type.Contains('|') ? OptionEditor.Choice
+        : Type is "bool" ? OptionEditor.Toggle
+        : Type is "int" or "float" or "number"
+            ? (Min.Length > 0 && Max.Length > 0 ? OptionEditor.Slider : OptionEditor.Number)
+            : OptionEditor.Text;
+
+    public bool IsChoice => Editor == OptionEditor.Choice;
+    public bool IsToggle => Editor == OptionEditor.Toggle;
+    public bool IsSlider => Editor == OptionEditor.Slider;
+    public bool IsNumber => Editor == OptionEditor.Number;
+    public bool IsText   => Editor == OptionEditor.Text;
+
+    /// <summary>The alternatives for a choice option, from its pipe-separated type.</summary>
+    public IReadOnlyList<string> Choices =>
+        Type.Contains('|') ? Type.Split('|', StringSplitOptions.RemoveEmptyEntries) : [];
+
+    /// <summary>
+    /// The model's default with any JSON quoting removed -- enum defaults arrive
+    /// as "native" rather than native, which would never match a choice.
+    /// </summary>
+    public string DefaultDisplay => Default.Trim('"');
+
+    /// <summary>
+    /// The selected choice: the user's value if set, else the model's default.
+    /// Setting it back to the default clears the value, so the request carries
+    /// only what was actually changed.
+    /// </summary>
+    public string? Choice
+    {
+        get => _value.Length > 0 ? _value : (DefaultDisplay.Length > 0 ? DefaultDisplay : null);
+        set => Value = value is null || value == DefaultDisplay ? "" : value;
+    }
+
+    public bool Toggle
+    {
+        get => bool.TryParse(_value.Length > 0 ? _value : DefaultDisplay, out var on) && on;
+        set => Value = value.ToString().ToLowerInvariant() == DefaultDisplay.ToLowerInvariant()
+            ? "" : value.ToString().ToLowerInvariant();
+    }
+
+    public double NumberValue
+    {
+        get => double.TryParse(_value.Length > 0 ? _value : DefaultDisplay,
+                   System.Globalization.CultureInfo.InvariantCulture, out var number) ? number : 0;
+        set => Value = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    public double NumberMin =>
+        double.TryParse(Min, System.Globalization.CultureInfo.InvariantCulture, out var m) ? m : double.MinValue;
+
+    public double NumberMax =>
+        double.TryParse(Max, System.Globalization.CultureInfo.InvariantCulture, out var m) ? m : double.MaxValue;
+
+    /// <summary>Integers step by one; floats need something finer.</summary>
+    public double NumberStep => Type == "int" ? 1 : 0.1;
+
+    /// <summary>Name plus the default, which is what a user needs to see beside a control.</summary>
+    public string Label => DefaultDisplay.Length > 0 ? $"{Name}   (default {DefaultDisplay})" : Name;
 
     public string Value
     {
@@ -1612,6 +1716,9 @@ public sealed class DeclaredOption(
 /// Formatting the offsets and discarding them is what made the rows
 /// unactionable in the first place; -1 means the row has no position.
 /// </param>
+/// <summary>Which control suits a declared option.</summary>
+public enum OptionEditor { Choice, Toggle, Slider, Number, Text }
+
 public readonly record struct ResultRow(
     string Kind, string Span, string Value, string Detail,
     long StartSample = -1, long EndSample = -1);

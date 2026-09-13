@@ -106,6 +106,22 @@ internal static class LiveCheck
                     // Screenshot each task so the control layout can be compared.
                     // One task, held open: capturing a rotating set meant guessing
                     // when each frame was up, and the guesses kept landing wrong.
+                    // Load first when a model is given: the option editors are
+                    // built from what the model declares, so an unloaded window
+                    // shows none of them.
+                    if (viewModel.ModelPath.Length > 0)
+                    {
+                        await viewModel.LoadCommand.ExecuteAsync();
+                        Console.WriteLine($"load: {viewModel.Status}");
+                        Console.WriteLine($"request options: {viewModel.RequestOptions.Count}, "
+                                          + $"session: {viewModel.SessionOptions.Count}");
+                        foreach (var option in viewModel.RequestOptions.Concat(viewModel.SessionOptions))
+                        {
+                            Console.WriteLine($"  {option.Editor,-7} {option.Name} "
+                                              + $"(type '{option.Type}', default '{option.DefaultDisplay}')");
+                        }
+                    }
+
                     var task = args.FirstOrDefault(a => a.StartsWith("task="))?["task=".Length..] ?? "asr";
                     viewModel.Task = task;
                     await Task.Delay(400);
