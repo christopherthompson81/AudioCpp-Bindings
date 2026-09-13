@@ -577,6 +577,12 @@ internal static class Routes
             return Problem(invalid ? 400 : 500,
                 invalid ? "invalid_request_error" : "engine_error", error.Message);
         }
+        catch (OperationCanceledException)
+        {
+            // The client hung up. Nothing to report and nobody to report it
+            // to; letting it escape would log a disconnect as a server fault.
+            return Results.Empty;
+        }
         catch (Exception error) when (error is InvalidDataException or AudioCppException)
         {
             // Past the first byte the status is already sent, so the only place

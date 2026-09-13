@@ -72,11 +72,15 @@ internal sealed class Sse(HttpResponse response)
         await response.Body.FlushAsync(cancel);
     }
 
+    /// <remarks>
+    /// Pinned rather than left implicit. Including nulls is already the
+    /// default, but it is load-bearing here and a default can be changed
+    /// globally: a null <c>ttft_ms</c> is the live routes' way of saying output
+    /// began before input ended, so dropping the field would turn a deliberate
+    /// answer into a missing one.
+    /// </remarks>
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        // Null means "there was no time to first token", which the live routes
-        // use to say output began before input ended. Dropping the field would
-        // turn a deliberate answer into a missing one.
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never,
     };
 }

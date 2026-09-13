@@ -120,6 +120,10 @@ internal static class Streaming
                                  "engine_error", cancel);
             return;
         }
+        // Measured from the route rather than read from an engine TTFT event:
+        // the first audio delta is that event as far as a client can tell, and
+        // it includes the transport, which is what a caller waiting on the
+        // first byte actually experiences.
         await sse.SendAsync(new { type = "speech.audio.done", timing = new { ttft_ms = Round(ttft) } },
                             cancel);
         await sse.DoneAsync(cancel);
