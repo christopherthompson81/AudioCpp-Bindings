@@ -17,10 +17,11 @@ namespace AudioCpp.Server;
 /// </remarks>
 internal static class Routes
 {
-    private static async Task<IResult> TranscribeAsync(HttpRequest http, ModelPool pool,
+    private static async Task<IResult> TranscribeAsync(HttpContext context, ModelPool pool,
                                                        Action<string> log, bool detailed,
                                                        CancellationToken cancel)
     {
+        var http = context.Request;
         TranscriptionRequest request;
         try
         {
@@ -38,14 +39,31 @@ internal static class Routes
         }
         if (request.Stream)
         {
-            // On /details this is upstream's documented 400: SSE carries
-            // transcript deltas and has nowhere to put the detail arrays. On the
-            // plain route it is simply not implemented yet, and saying so beats
-            // returning one whole transcript to a client waiting for events.
-            return Problem(400, detailed ? "invalid_request_error" : "not_implemented",
-                detailed
-                    ? "stream is not supported on /details; use /v1/audio/transcriptions"
-                    : "streamed transcription is not implemented yet; omit 'stream'");
+            if (detailed)
+            {
+                // Upstream's documented 400: SSE carries transcript deltas and
+                // has nowhere to put the detail arrays.
+                return Problem(400, "invalid_request_error",
+                    "stream is not supported on /details; use /v1/audio/transcriptions");
+            }
+            if (pool.Spec(request.Model)?.Mode != "streaming")
+            {
+                return Problem(400, "invalid_request_error",
+                    "transcription stream=true requires a model configured with mode=streaming");
+            }
+            try
+            {
+                await Streaming.TranscriptionAsync(context, pool, request, log, cancel);
+                return Results.Empty;
+            }
+            catch (AudioCppException error) when (!context.Response.HasStarted)
+            {
+                // Before the first byte a failure can still be a status code.
+                // After it, Streaming reports through the stream itself -- see
+                // Sse.ErrorAsync.
+                log($"POST /v1/audio/transcriptions  {request.Model}  stream failed: {error.Message}");
+                return Problem(500, "engine_error", error.Message);
+            }
         }
 
         var started = Stopwatch.StartNew();
@@ -518,6 +536,67 @@ internal static class Routes
         return Results.Json(new { id, loaded = false });
     }
 
+    /// <summary>
+    /// The live routes, which share everything but which model runs and what
+    /// comes back.
+    /// </summary>
+    private static async Task<IResult> LiveAsync(HttpContext context, ModelPool pool,
+                                                 Action<string> log, bool speech,
+                                                 CancellationToken cancel)
+    {
+        var id = context.Request.Query["model"].ToString();
+        if (id.Length == 0)
+        {
+            return Problem(400, "invalid_request_error", "live requests require a 'model' parameter");
+        }
+        var spec = pool.Spec(id);
+        if (spec is null) return Problem(404, "model_not_found", $"no model with id '{id}'");
+        if (spec.Mode != "streaming")
+        {
+            return Problem(400, "invalid_request_error",
+                "live ingest requires a model configured with mode=streaming");
+        }
+
+        try
+        {
+            if (speech)
+            {
+                await Streaming.LiveSpeechAsync(context, pool, id, pool.LiveIngest, log, cancel);
+            }
+            else
+            {
+                await Streaming.LiveTranscriptionAsync(context, pool, id, pool.LiveIngest, log, cancel);
+            }
+            return Results.Empty;
+        }
+        catch (Exception error) when (error is InvalidDataException or AudioCppException
+                                      && !context.Response.HasStarted)
+        {
+            var invalid = error is InvalidDataException;
+            log($"live {(speech ? "speech" : "transcription")}  {id}  failed: {error.Message}");
+            return Problem(invalid ? 400 : 500,
+                invalid ? "invalid_request_error" : "engine_error", error.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            // The client hung up. Nothing to report and nobody to report it
+            // to; letting it escape would log a disconnect as a server fault.
+            return Results.Empty;
+        }
+        catch (Exception error) when (error is InvalidDataException or AudioCppException)
+        {
+            // Past the first byte the status is already sent, so the only place
+            // left to report is the stream. A client that sees an error event
+            // instead of [DONE] knows the transcript it holds is incomplete --
+            // which a silently closed connection would not tell it.
+            log($"live {(speech ? "speech" : "transcription")}  {id}  failed mid-stream: {error.Message}");
+            await Sse.Attach(context.Response).ErrorAsync(
+                error.Message, error is InvalidDataException ? "invalid_request_error" : "engine_error",
+                CancellationToken.None);
+            return Results.Empty;
+        }
+    }
+
     private sealed record Transcribed(
         string Text,
         string Language,
@@ -579,11 +658,29 @@ internal static class Routes
             }
             if (request.StreamFormat.Length > 0)
             {
-                // Honest 400 rather than a silent non-streaming response: a
-                // client asking for SSE and getting one WAV would look like the
-                // stream ended immediately.
-                return Problem(400, "not_implemented",
-                    "streaming speech is not implemented yet; omit 'stream_format'");
+                if (request.StreamFormat is not ("sse" or "audio"))
+                {
+                    return Problem(400, "invalid_request_error",
+                        "streaming speech stream_format must be sse or audio");
+                }
+                if (pool.Spec(request.Model)?.Mode != "streaming")
+                {
+                    // The model decides this, not the route: an offline session
+                    // has no events to emit, so a stream over one would be a
+                    // single delta pretending to be a stream.
+                    return Problem(400, "invalid_request_error",
+                        "streaming speech requires a model configured with mode=streaming");
+                }
+                try
+                {
+                    await Streaming.SpeechAsync(http, pool, request, log, http.RequestAborted);
+                    return Results.Empty;
+                }
+                catch (AudioCppException error) when (!http.Response.HasStarted)
+                {
+                    log($"POST /v1/audio/speech  {request.Model}  stream failed: {error.Message}");
+                    return Problem(500, "engine_error", error.Message);
+                }
             }
 
             var started = Stopwatch.StartNew();
@@ -592,18 +689,7 @@ internal static class Routes
                 var audio = await pool.UseAsync(request.Model, session =>
                 {
                     using var task = new AudioCppRequest();
-                    task.SetText(request.Input,
-                        request.Language.Length > 0 ? request.Language : null);
-                    if (request.Voice.Length > 0) task.SetVoiceId(request.Voice);
-                    if (request.VoiceReference is { } reference)
-                    {
-                        task.SetVoiceAudio(reference.Samples, reference.SampleRate,
-                                           reference.Channels);
-                    }
-                    foreach (var (name, value) in request.Options)
-                    {
-                        if (value.Length > 0) task.SetOption(name, value);
-                    }
+                    request.ApplyTo(task);
 
                     using var result = session.Run(task);
                     return result.Audio is { } output
@@ -654,11 +740,11 @@ internal static class Routes
         // That is what it did: the handler logged a successful transcription
         // and the client got nothing.
         app.MapPost("/v1/audio/transcriptions",
-            (HttpRequest request, CancellationToken cancel) =>
-                TranscribeAsync(request, pool, log, detailed: false, cancel));
+            (HttpContext context, CancellationToken cancel) =>
+                TranscribeAsync(context, pool, log, detailed: false, cancel));
         app.MapPost("/v1/audio/transcriptions/details",
-            (HttpRequest request, CancellationToken cancel) =>
-                TranscribeAsync(request, pool, log, detailed: true, cancel));
+            (HttpContext context, CancellationToken cancel) =>
+                TranscribeAsync(context, pool, log, detailed: true, cancel));
 
         app.MapPost("/v1/audio/alignments",
             (HttpRequest request, CancellationToken cancel) =>
@@ -672,6 +758,17 @@ internal static class Routes
             log($"GET /v1/audio/voices  {(id.Length > 0 ? id : "(unspecified)")}");
             return Results.Json(new { voices = pool.VoicesFor(id) });
         });
+
+        // Live ingest: the request body is the audio, arriving chunked, and
+        // the response can begin before it ends. A separate path rather than a
+        // flag, because the transport differs -- every existing client of the
+        // routes above is untouched by it.
+        app.MapPost("/v1/audio/transcriptions/live",
+            (HttpContext context, CancellationToken cancel) =>
+                LiveAsync(context, pool, log, speech: false, cancel));
+        app.MapPost("/v1/audio/speech/live",
+            (HttpContext context, CancellationToken cancel) =>
+                LiveAsync(context, pool, log, speech: true, cancel));
 
         // Residency, which a client managing several models has to be able to
         // see and change: loading is slow and unloading frees the device.

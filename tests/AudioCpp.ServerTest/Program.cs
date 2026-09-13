@@ -171,6 +171,20 @@ if (asrModel is { Length: > 0 } && File.Exists(asrModel)
         asrAudio);
 }
 
+var streamTts = Environment.GetEnvironmentVariable("AUDIOCPP_STREAM_TTS_MODEL") ?? "";
+var streamAsr = (asrModel is { Length: > 0 } && File.Exists(asrModel)) ? asrModel : "";
+if ((streamTts.Length > 0 && File.Exists(streamTts)) || streamAsr.Length > 0)
+{
+    Console.WriteLine();
+    failures += await AudioCpp.ServerTest.Streamed.RunAsync(
+        File.Exists(streamTts) ? streamTts : "",
+        Environment.GetEnvironmentVariable("AUDIOCPP_STREAM_TTS_FAMILY") ?? "",
+        streamAsr,
+        Environment.GetEnvironmentVariable("AUDIOCPP_ASR_FAMILY") ?? "",
+        Environment.GetEnvironmentVariable("AUDIOCPP_BACKEND") ?? "cpu",
+        asrAudio ?? "");
+}
+
 var alignModel = Environment.GetEnvironmentVariable("AUDIOCPP_ALIGN_MODEL");
 var alignAudio = Environment.GetEnvironmentVariable("AUDIOCPP_ALIGN_AUDIO");
 var alignText = Environment.GetEnvironmentVariable("AUDIOCPP_ALIGN_TEXT");

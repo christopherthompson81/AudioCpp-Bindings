@@ -17,6 +17,37 @@ public static class ServerLimits
     public const int MaxInlineReferenceBytes = 5 * 1024 * 1024;
 }
 
+/// <summary>
+/// Bounds on a live-ingest request, which holds a model for as long as its
+/// connection lasts.
+/// </summary>
+/// <remarks>
+/// Every one of these exists because the live routes invert the usual
+/// arrangement: the client decides when the request ends. Without bounds, a
+/// client that opens a connection and then stops sending holds the model
+/// indefinitely, and one that stops *reading* does the same — so the send
+/// timeout matters as much as the idle one. Upstream's defaults, which suit one
+/// dictation at a time.
+///
+/// <c>0</c> means disabled, upstream's convention, except for
+/// <see cref="MaxChunkBytes"/>: a chunk is materialised in memory before it is
+/// used, so an unbounded one is not implementable.
+/// </remarks>
+public sealed record LiveIngestLimits
+{
+    /// <summary>Longest wait for more data once the reader has asked for it.</summary>
+    public int IdleTimeoutMs { get; init; } = 30_000;
+
+    /// <summary>Checked every time the body advances, so it caps the request.</summary>
+    public int TotalTimeoutMs { get; init; } = 600_000;
+
+    /// <summary>Received body bytes, framing included.</summary>
+    public long MaxBodyBytes { get; init; } = 512L * 1024 * 1024;
+
+    /// <summary>Largest single read handed to the model.</summary>
+    public int MaxChunkBytes { get; init; } = 8 * 1024 * 1024;
+}
+
 /// <summary>One model the server offers, as server.json declares it.</summary>
 /// <param name="Id">The name a client uses in a request.</param>
 /// <param name="Family">Family hint, or empty to identify from the path.</param>
@@ -87,6 +118,9 @@ public sealed record ServerConfig
     /// could never serve anything.
     /// </remarks>
     public bool UiManagement { get; init; }
+
+    /// <summary>Bounds on the live-ingest routes.</summary>
+    public LiveIngestLimits LiveIngest { get; init; } = new();
 
     public IReadOnlyList<ServerModel> Models { get; init; } = [];
 }

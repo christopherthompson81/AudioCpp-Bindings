@@ -167,4 +167,25 @@ internal sealed record SpeechRequest
         using var stream = new MemoryStream(bytes);
         return Wav.Read(stream);
     }
+    /// <summary>Applies everything parsed here to a live request.</summary>
+    /// <remarks>
+    /// Shared by the buffered and streaming paths so the two cannot drift. They
+    /// differ in how the audio comes back, not in what was asked for, and a
+    /// second copy of this is how a voice reference ends up honoured by one and
+    /// ignored by the other.
+    /// </remarks>
+    public void ApplyTo(AudioCpp.AudioCppRequest task)
+    {
+        task.SetText(Input, Language.Length > 0 ? Language : null);
+        if (Voice.Length > 0) task.SetVoiceId(Voice);
+        if (VoiceReference is { } reference)
+        {
+            task.SetVoiceAudio(reference.Samples, reference.SampleRate, reference.Channels);
+        }
+        foreach (var (name, value) in Options)
+        {
+            if (value.Length > 0) task.SetOption(name, value);
+        }
+    }
+
 }
