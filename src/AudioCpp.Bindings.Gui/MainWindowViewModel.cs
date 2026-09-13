@@ -1446,8 +1446,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 // Read the audio before the session is built: how long the clip is decides
                 // whether the chunking preset applies, and the preset carries session
                 // options, which have to be settled before CreateSession.
+                // The same predicate the layout uses, so the run asks for exactly
+                // the inputs the window offered. "Anything but tts reads audio"
+                // was true when there were six tasks; music generation and voice
+                // design start from text alone, and demanding a WAV for them
+                // failed the run with "Select a WAV file first." over a panel
+                // that never showed an audio box.
                 (float[] Samples, int SampleRate, int Channels)? clip = null;
-                if (Task != "tts")
+                if (ShowAudioInput)
                 {
                     if (AudioPath.Length == 0)
                         throw new InvalidOperationException("Select a WAV file first.");
@@ -1496,24 +1502,36 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 {
                     request.SetOption(option.Name, option.Value);   // an explicit edit wins
                 }
-                if (Task == "tts")
+                if (!ShowAudioInput)
                 {
-                    // Long text goes piece by piece against one session; handing a
-                    // family more than it can take in a request either truncates or
-                    // throws, depending on the family.
-                    var pieces = SplitLongText
-                        ? TextChunker.Split(Text, Math.Max(1, ChunkBudget))
-                        : [Text];
-
-                    if (pieces.Count > 1)
+                    // Splitting is a speech concern, and only where the window
+                    // offered it. Music generation takes a prompt, not a
+                    // script -- upstream's own docs say the speech chunker does
+                    // not apply -- so cutting a prompt into pieces and
+                    // concatenating the results would produce several unrelated
+                    // clips joined end to end.
+                    if (ShowTextChunking)
                     {
-                        transcript = RunLongText(pieces, rows);
-                        return;
+                        // Long text goes piece by piece against one session; handing
+                        // a family more than it can take in a request either
+                        // truncates or throws, depending on the family.
+                        var pieces = SplitLongText
+                            ? TextChunker.Split(Text, Math.Max(1, ChunkBudget))
+                            : [Text];
+
+                        if (pieces.Count > 1)
+                        {
+                            transcript = RunLongText(pieces, rows);
+                            return;
+                        }
                     }
 
                     request.SetText(Text, "en-us");
-                    if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
-                    ApplyVoiceReference(request);
+                    if (ShowVoice)
+                    {
+                        if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
+                        ApplyVoiceReference(request);
+                    }
                 }
                 else
                 {
@@ -2373,6 +2391,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             Status = Describe(exception);
         }
+    }
+
+    /// <summary>Write the run's audio, for a headless caller with no dialog.</summary>
+    internal void WriteOutput(string path)
+    {
+        if (_outputSamples is null) return;
+        Wav.Write(path, _outputSamples, _outputSampleRate, _outputChannels);
     }
 
     private async Task SaveWavAsync()

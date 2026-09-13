@@ -16,6 +16,7 @@ internal static class Smoke
             return 77;
         }
 
+        var outPath = "";
         var viewModel = new MainWindowViewModel
         {
             ModelPath = args[0],
@@ -77,6 +78,10 @@ internal static class Smoke
                 case "split": viewModel.SplitLongText = bool.Parse(parts[1]); continue;
                 case "budget": viewModel.ChunkBudget = int.Parse(parts[1]); continue;
                 case "text": viewModel.Text = parts[1]; continue;
+                // Somewhere to put generated audio. The window has Save WAV;
+                // without this the headless path can report that a run produced
+                // 12 seconds of audio but give no way to listen to it.
+                case "out": outPath = parts[1]; continue;
                 case "voice_ref": viewModel.VoiceAudioPath = parts[1]; continue;
                 case "voice_text": viewModel.VoiceTranscript = parts[1]; continue;
                 case "capture":
@@ -173,6 +178,12 @@ internal static class Smoke
         {
             Console.WriteLine("the run produced nothing");
             return 1;
+        }
+
+        if (outPath.Length > 0 && viewModel.OutputSamples.Length > 0)
+        {
+            viewModel.WriteOutput(outPath);
+            Console.WriteLine($"wrote {outPath}");
         }
 
         Console.WriteLine("demo smoke OK");

@@ -14,6 +14,51 @@ namespace AudioCpp.Bindings.Gui;
 /// </remarks>
 internal static class SettingsCheck
 {
+    /// <summary>
+    /// Wait until a queued save reaches disk, rather than sleeping past the
+    /// debounce and hoping.
+    /// </summary>
+    /// <remarks>
+    /// A fixed wait is fine idle and tight under load: this check failed once
+    /// in a batch where everything ran back to back, and passed eleven times
+    /// alone. Waiting for the condition removes the timing from the test
+    /// entirely.
+    /// </remarks>
+    private static bool WaitForSave(SettingsStore store, DateTime since)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (File.Exists(store.StorePath)
+                && File.GetLastWriteTimeUtc(store.StorePath) > since)
+            {
+                // The writer moves a temp file into place; give the move a
+                // moment to be visible before anything reads it.
+                Thread.Sleep(50);
+                return true;
+            }
+            Thread.Sleep(25);
+        }
+        return false;
+    }
+
+    /// <summary>Wait until no save has landed for a while, so none is pending.</summary>
+    private static void WaitForQuiet(SettingsStore store)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        var last = File.Exists(store.StorePath)
+            ? File.GetLastWriteTimeUtc(store.StorePath) : DateTime.MinValue;
+        var since = DateTime.UtcNow;
+        while (DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(50);
+            var now = File.Exists(store.StorePath)
+                ? File.GetLastWriteTimeUtc(store.StorePath) : DateTime.MinValue;
+            if (now != last) { last = now; since = DateTime.UtcNow; continue; }
+            if (DateTime.UtcNow - since > TimeSpan.FromMilliseconds(600)) return;
+        }
+    }
+
     public static int Run()
     {
         var failures = 0;
@@ -58,6 +103,8 @@ internal static class SettingsCheck
             Console.WriteLine($"no file yet: theme={first.Theme} workflow={first.CurrentWorkflow} "
                               + $"task={first.Task} threads={first.Threads}");
 
+            var beforeFirst = File.Exists(store.StorePath)
+                ? File.GetLastWriteTimeUtc(store.StorePath) : DateTime.MinValue;
             first.Theme = "Dark";
             first.CurrentWorkflow = "vc";
             first.Backend = "cuda";
@@ -66,9 +113,7 @@ internal static class SettingsCheck
             first.SplitLongText = false;
             first.FamilyHint = "parakeet_tdt";
             first.VoiceId = "af_heart";
-            Thread.Sleep(1200);   // past the debounce
-
-            if (!File.Exists(store.StorePath))
+            if (!WaitForSave(store, beforeFirst))
             {
                 Console.Error.WriteLine("nothing was written"); failures++;
             }
@@ -95,8 +140,9 @@ internal static class SettingsCheck
             // 4. A burst of changes must leave the last one on disk, and must
             //    not trip over its own debounce: each change disposes the
             //    source the previous one is waiting on.
+            var beforeBurst = File.GetLastWriteTimeUtc(store.StorePath);
             for (var i = 0; i < 2000; i++) first.ChunkBudget = 1000 + i;
-            Thread.Sleep(1200);
+            WaitForSave(store, beforeBurst);
             var burst = new MainWindowViewModel(new SettingsStore(directory));
             Console.WriteLine($"after 2000 rapid changes: chunk budget={burst.ChunkBudget} (want 2999)");
             if (burst.ChunkBudget != 2999) { Console.Error.WriteLine("the last change was lost"); failures++; }
@@ -114,6 +160,8 @@ internal static class SettingsCheck
             // The picker's choice is remembered per workflow, and across a
             // restart. Selecting in one tab, looking at another and coming back
             // has to bring the choice back with it.
+            var beforePicker = File.Exists(store.StorePath)
+                ? File.GetLastWriteTimeUtc(store.StorePath) : DateTime.MinValue;
             var picker = new MainWindowViewModel(new SettingsStore(directory));
             picker.CurrentWorkflow = "asr";
             var asrPick = picker.CatalogEntries.Skip(2).FirstOrDefault();
@@ -139,7 +187,11 @@ internal static class SettingsCheck
                     Console.Error.WriteLine("a tab switch lost the selection"); failures++;
                 }
 
-                Thread.Sleep(1200);   // past the debounce
+                if (!WaitForSave(store, beforePicker))
+                {
+                    Console.Error.WriteLine("the picker's choices never reached disk");
+                    failures++;
+                }
                 var reopened = new MainWindowViewModel(new SettingsStore(directory));
                 var restored = reopened.SelectedEntry?.Key;
                 Console.WriteLine($"  after a restart, on {reopened.CurrentWorkflow}: {restored}");
@@ -176,8 +228,9 @@ internal static class SettingsCheck
                 Console.WriteLine("  no installed package; the model-path clobber is not staged");
             }
             manual.SelectedEntry = installed ?? manual.CatalogEntries.FirstOrDefault();
+            var beforeManual = File.GetLastWriteTimeUtc(store.StorePath);
             manual.ModelPath = "/models/hand-picked.gguf";
-            Thread.Sleep(1200);
+            WaitForSave(store, beforeManual);
 
             var reloaded = new MainWindowViewModel(new SettingsStore(directory));
             Console.WriteLine($"  saved path '/models/hand-picked.gguf' came back as "
@@ -196,12 +249,13 @@ internal static class SettingsCheck
             //    stamp, then load. Stamping while a legitimate save from an
             //    earlier step was still in its debounce made this fail on the
             //    test's own ordering rather than on the thing it checks.
-            Thread.Sleep(1200);
+            WaitForQuiet(store);
             var stamp = File.GetLastWriteTimeUtc(store.StorePath);
             var loader = new MainWindowViewModel(new SettingsStore(directory));
             Console.WriteLine($"  a loading window opened on {loader.CurrentWorkflow}, "
                               + $"selection {loader.SelectedEntry?.Key ?? "(none)"}, "
                               + $"{loader.SelectedPackages.Count} remembered");
+            // Necessarily a fixed wait: an absence cannot be waited for.
             Thread.Sleep(1200);
             if (File.GetLastWriteTimeUtc(store.StorePath) != stamp)
             {
