@@ -106,6 +106,42 @@ internal static class LiveCheck
                     // Screenshot each task so the control layout can be compared.
                     // One task, held open: capturing a rotating set meant guessing
                     // when each frame was up, and the guesses kept landing wrong.
+                    // Load first when a model is given: the option editors are
+                    // built from what the model declares, so an unloaded window
+                    // shows none of them.
+                    if (viewModel.ModelPath.Length > 0)
+                    {
+                        await viewModel.LoadCommand.ExecuteAsync();
+                        Console.WriteLine($"load: {viewModel.Status}");
+                        Console.WriteLine($"request options: {viewModel.RequestOptions.Count}, "
+                                          + $"session: {viewModel.SessionOptions.Count}");
+                        foreach (var option in viewModel.RequestOptions.Concat(viewModel.SessionOptions))
+                        {
+                            Console.WriteLine($"  {option.Editor,-7} {option.Name} "
+                                              + $"(type '{option.Type}', default '{option.DefaultDisplay}')");
+                        }
+                    }
+
+                    // Round-trip check: a typed control must land on the same
+                    // DeclaredOption the run path reads, and returning it to the
+                    // model's default must clear it so the request stays minimal.
+                    if (viewModel.SessionOptions.FirstOrDefault(o => o.IsChoice) is { } choice)
+                    {
+                        var other = choice.Choices.FirstOrDefault(c => c != choice.DefaultDisplay);
+                        choice.Choice = other;
+                        var shared = viewModel.Options.First(o => o.Name == choice.Name);
+                        Console.WriteLine($"roundtrip: set {choice.Name}={other} -> "
+                                          + $"Value='{shared.Value}' (shared instance: {ReferenceEquals(shared, choice)})");
+                        choice.Choice = choice.DefaultDisplay;
+                        Console.WriteLine($"roundtrip: back to default -> Value='{shared.Value}' (expect empty)");
+                    }
+                    if (viewModel.RequestOptions.FirstOrDefault(o => o.IsNumber) is { } number)
+                    {
+                        number.NumberValue = 42;
+                        Console.WriteLine($"roundtrip: set {number.Name}=42 -> Value='{number.Value}'");
+                        number.Value = "";
+                    }
+
                     var task = args.FirstOrDefault(a => a.StartsWith("task="))?["task=".Length..] ?? "asr";
                     viewModel.Task = task;
                     await Task.Delay(400);

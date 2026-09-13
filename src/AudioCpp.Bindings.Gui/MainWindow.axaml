@@ -258,19 +258,83 @@
 
               <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
 
-              <TextBlock Text="Declared options — read from the model at runtime. Edit Value to set one; blank uses the model's default."
+              <TextBlock Text="Options the model declares about itself. Blank means the model's own default."
                          Classes="Subtle" TextWrapping="Wrap" />
-              <DataGrid ItemsSource="{Binding Options}" Height="160"
-                        GridLinesVisibility="Horizontal"
-                        HorizontalScrollBarVisibility="Auto">
-                <DataGrid.Columns>
-                  <DataGridTextColumn Header="Scope"   Binding="{Binding Scope}" Width="90"  IsReadOnly="True" />
-                  <DataGridTextColumn Header="Name"    Binding="{Binding Name}"  Width="200" IsReadOnly="True" />
-                  <DataGridTextColumn Header="Type"    Binding="{Binding Type}"  Width="110" IsReadOnly="True" />
-                  <DataGridTextColumn Header="Default" Binding="{Binding Default}" Width="90" IsReadOnly="True" />
-                  <DataGridTextColumn Header="Value"   Binding="{Binding Value}" Width="*" MinWidth="120" />
-                </DataGrid.Columns>
-              </DataGrid>
+
+              <!-- Typed editors built from what the model reports: pipe-separated
+                   types become dropdowns, bool becomes a checkbox, bounded
+                   numerics a slider, the rest a spinner or a text box. -->
+              <ItemsControl ItemsSource="{Binding RequestOptions}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:DeclaredOption">
+                    <Grid ColumnDefinitions="230,10,*" Margin="0,0,0,7"
+                          ToolTip.Tip="{Binding Description}">
+                      <TextBlock Grid.Column="0" Text="{Binding Label}" Classes="Subtle"
+                                 TextWrapping="Wrap" VerticalAlignment="Center" />
+                      <ComboBox Grid.Column="2" IsVisible="{Binding IsChoice}"
+                                ItemsSource="{Binding Choices}" SelectedItem="{Binding Choice}"
+                                HorizontalAlignment="Stretch" />
+                      <CheckBox Grid.Column="2" IsVisible="{Binding IsToggle}"
+                                IsChecked="{Binding Toggle}" />
+                      <Slider Grid.Column="2" IsVisible="{Binding IsSlider}"
+                              Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
+                              Value="{Binding NumberValue}" />
+                      <NumericUpDown Grid.Column="2" IsVisible="{Binding IsNumber}"
+                                     Value="{Binding NumberValue}" Increment="{Binding NumberStep}"
+                                     Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
+                                     HorizontalAlignment="Stretch" />
+                      <TextBox Grid.Column="2" IsVisible="{Binding IsText}"
+                               Text="{Binding Value}" Watermark="{Binding DefaultDisplay}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <!-- Session options are shown apart because changing one rebuilds
+                   the session: a different promise from a per-run setting. -->
+              <Expander Header="Session options — changing one rebuilds the session">
+                <ItemsControl ItemsSource="{Binding SessionOptions}" Margin="0,8,0,0">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:DeclaredOption">
+                      <Grid ColumnDefinitions="230,10,*" Margin="0,0,0,7"
+                            ToolTip.Tip="{Binding Description}">
+                        <TextBlock Grid.Column="0" Text="{Binding Label}" Classes="Subtle"
+                                   TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <ComboBox Grid.Column="2" IsVisible="{Binding IsChoice}"
+                                  ItemsSource="{Binding Choices}" SelectedItem="{Binding Choice}"
+                                  HorizontalAlignment="Stretch" />
+                        <CheckBox Grid.Column="2" IsVisible="{Binding IsToggle}"
+                                  IsChecked="{Binding Toggle}" />
+                        <Slider Grid.Column="2" IsVisible="{Binding IsSlider}"
+                                Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
+                                Value="{Binding NumberValue}" />
+                        <NumericUpDown Grid.Column="2" IsVisible="{Binding IsNumber}"
+                                       Value="{Binding NumberValue}" Increment="{Binding NumberStep}"
+                                       Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
+                                       HorizontalAlignment="Stretch" />
+                        <TextBox Grid.Column="2" IsVisible="{Binding IsText}"
+                                 Text="{Binding Value}" Watermark="{Binding DefaultDisplay}" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Expander>
+
+              <!-- The full surface stays reachable: nothing hardcoded means
+                   nothing hidden either. -->
+              <Expander Header="All declared options" IsExpanded="{Binding ShowAllOptions}">
+                <DataGrid ItemsSource="{Binding Options}" Height="200"
+                          GridLinesVisibility="Horizontal"
+                          HorizontalScrollBarVisibility="Auto">
+                  <DataGrid.Columns>
+                    <DataGridTextColumn Header="Scope"   Binding="{Binding Scope}" Width="90"  IsReadOnly="True" />
+                    <DataGridTextColumn Header="Name"    Binding="{Binding Name}"  Width="200" IsReadOnly="True" />
+                    <DataGridTextColumn Header="Type"    Binding="{Binding Type}"  Width="110" IsReadOnly="True" />
+                    <DataGridTextColumn Header="Default" Binding="{Binding Default}" Width="90" IsReadOnly="True" />
+                    <DataGridTextColumn Header="Value"   Binding="{Binding Value}" Width="*" MinWidth="120" />
+                  </DataGrid.Columns>
+                </DataGrid>
+              </Expander>
 
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <Button Classes="Primary" Content="Run" Command="{Binding RunCommand}" />
