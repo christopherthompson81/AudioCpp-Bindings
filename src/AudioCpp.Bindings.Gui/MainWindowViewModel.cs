@@ -1255,8 +1255,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Transcript = "";
         ResultJson = "";
         ModelSummary = "";
+        // Output belongs to a run and goes with the model. The input clip is the
+        // user's own file and does not, so it survives an unload and stays
+        // previewable.
         _outputSamples = null;
-        _inputClip = null;
         IsLoaded = false;
 
         for (var i = 0; i < TaskChips.Count; i++) TaskChips[i] = TaskChips[i] with { Count = 0 };
