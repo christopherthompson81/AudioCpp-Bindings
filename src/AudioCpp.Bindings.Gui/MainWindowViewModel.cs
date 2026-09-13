@@ -346,15 +346,33 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>The clip a cloning family should imitate.</summary>
-    public string VoiceAudioPath { get => _voiceAudioPath; set => Set(ref _voiceAudioPath, value); }
+    public string VoiceAudioPath
+    {
+        get => _voiceAudioPath;
+        set { if (Set(ref _voiceAudioPath, value)) Notify(nameof(VoiceWarning)); }
+    }
 
     /// <summary>What the reference clip says, which cloning families want.</summary>
-    public string VoiceTranscript { get => _voiceTranscript; set => Set(ref _voiceTranscript, value); }
+    public string VoiceTranscript
+    {
+        get => _voiceTranscript;
+        set { if (Set(ref _voiceTranscript, value)) Notify(nameof(VoiceWarning)); }
+    }
 
     public string VoiceName { get => _voiceName; set => Set(ref _voiceName, value); }
 
     /// <summary>Where the library is stored, so a user can find or back it up.</summary>
     public string VoiceLibraryPath => _voices.StorePath;
+
+    /// <summary>
+    /// Warn before the engine does. A reference clip without its transcript is
+    /// rejected outright by at least one family, and "requires reference_text
+    /// option" is not a message a user can act on without knowing the ABI.
+    /// </summary>
+    public string VoiceWarning =>
+        VoiceAudioPath.Length > 0 && VoiceTranscript.Length == 0
+            ? "Add what the reference says — cloning families require it."
+            : "";
 
     public RelayCommand SaveVoiceCommand { get; }
     public RelayCommand DeleteVoiceCommand { get; }
@@ -1576,7 +1594,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             var reference = Wav.Read(VoiceAudioPath);
             request.SetVoiceAudio(reference.Samples, reference.SampleRate, reference.Channels);
-            if (VoiceTranscript.Length > 0) request.SetStyleTag("reference_text", VoiceTranscript);
+
+            // A request option, not a style tag. audio8_tts rejects inline
+            // reference audio without it outright -- "requires reference_text
+            // option" -- so a clip alone is not a usable reference.
+            if (VoiceTranscript.Length > 0) request.SetOption("reference_text", VoiceTranscript);
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException)
         {

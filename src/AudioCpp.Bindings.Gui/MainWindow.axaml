@@ -366,6 +366,8 @@
                   <TextBox Text="{Binding VoiceTranscript}" AcceptsReturn="True" Height="60"
                            TextWrapping="Wrap"
                            PlaceholderText="what the reference says (recommended for cloning)" />
+                  <TextBlock Text="{Binding VoiceWarning}" Classes="Subtle" FontSize="11"
+                             Foreground="{DynamicResource AppDanger}" TextWrapping="Wrap" />
                   <Grid ColumnDefinitions="*,8,Auto,8,Auto">
                     <TextBox Grid.Column="0" Text="{Binding VoiceName}" PlaceholderText="library name" />
                     <Button Grid.Column="2" Content="Save" Command="{Binding SaveVoiceCommand}" />
