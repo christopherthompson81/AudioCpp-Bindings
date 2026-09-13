@@ -1338,19 +1338,30 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 {
                     _model = _registry.Load(ModelPath, new ModelConfig(family));
                 }
-                catch (AudioCppException) when (_modelSpecs is not null)
+                // Only when the engine says it could not find a spec, and only
+                // then. A GGUF carries its own; handing it an external one makes
+                // it use that instead, and a model that loaded fine fails with
+                // "packed GGUF namespace does not exist". Safetensors packages
+                // are the case that needs it: nothing is embedded, and the
+                // engine only looks beside the model or up from the working
+                // directory, neither of which is where an installed package
+                // lives.
+                //
+                // Matching on the message is the only signal -- both failures
+                // return the same status. If upstream rewords it the fallback
+                // stops firing and the user sees that same message, which names
+                // --model-spec-override, so the failure explains itself.
+                catch (AudioCppException missingSpec)
+                    when (_modelSpecs is not null
+                          && missingSpec.Detail.Contains("model spec not found",
+                                                         StringComparison.Ordinal))
                 {
-                    // Only as a fallback. A GGUF carries its own spec, and
-                    // handing the engine an external one makes it use that
-                    // instead -- the layouts differ, and a model that loaded
-                    // fine fails with "packed GGUF namespace does not exist".
-                    // Safetensors packages are the case that needs it: nothing
-                    // is embedded, and the engine only looks beside the model or
-                    // up from the working directory, neither of which is where
-                    // an installed package lives.
+                    // Whatever this throws got further than the first attempt,
+                    // so its error is the more useful one to report.
                     _model = _registry.Load(ModelPath,
                         new ModelConfig(family, ModelSpecOverride: _modelSpecs));
                 }
+
                 if (VadModelPath.Length > 0)
                 {
                     _vadModel = _registry.Load(VadModelPath, "silero_vad");
