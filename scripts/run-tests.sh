@@ -9,16 +9,32 @@ set -uo pipefail
 
 BUILD_DIR="${1:?usage: run-tests.sh <build-dir> [models-root] [threads]}"
 MODELS_ROOT="${2:-}"
+# Resolved before the cd below. Left relative it would resolve against the engine's
+# source tree, and a models root that is merely in the wrong place reports "no
+# models" and exits 77 -- a skip, which reads as green.
+if [ -n "$MODELS_ROOT" ]; then
+    if [ ! -d "$MODELS_ROOT" ]; then
+        echo "models root not found: $MODELS_ROOT"
+        exit 1
+    fi
+    MODELS_ROOT="$(cd "$MODELS_ROOT" && pwd)"
+fi
 # Separation dominates the wall time and scales with threads; results are
 # unaffected by the count. Both languages get the same number so the
 # cross-language diff compares like with like.
 THREADS="${3:-$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) )}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+BINDINGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Multi-config generators -- Visual Studio, Xcode, Ninja Multi-Config -- put
 # outputs in a per-configuration subdirectory, so bin/ alone finds nothing on a
 # tree where the library is sitting right there. That reads as "not applicable"
 # and passes, which is the failure mode worth avoiding.
 BIN_ROOT="$(cd "$BUILD_DIR" && pwd)/bin"
+# The VAD model and the sample clips the tests read belong to audio.cpp, not to
+# this repository, which is a standalone consumer of the published ABI. CMake
+# records the source tree it configured from, so the build directory the caller
+# already passes is enough to find them -- no second path argument, and no
+# assumption that this checkout sits inside the engine's tree.
+SOURCE_ROOT="${AUDIOCPP_SOURCE_ROOT:-$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt" 2>/dev/null)}"
 BIN=""
 SEARCHED=""
 for config in "" Release RelWithDebInfo MinSizeRel Debug; do
@@ -40,17 +56,40 @@ if [ -z "$BIN" ]; then
 fi
 echo "native: $BIN"
 
+if [ ! -d "${SOURCE_ROOT:-}/assets" ]; then
+    # CMAKE_HOME_DIRECTORY is the absolute path of whatever machine configured the
+    # build, so a build directory copied between machines or a source tree moved
+    # after configuring lands here. Print what was tried -- a bare "skipping" is the
+    # same silent-green failure the bin/ search above is written to avoid.
+    echo "cannot locate the audio.cpp source tree."
+    echo "  from: $BUILD_DIR/CMakeCache.txt"
+    echo "  tried: ${SOURCE_ROOT:-<empty>}"
+    echo "Set AUDIOCPP_SOURCE_ROOT to override. Skipping."
+    exit 77
+fi
+echo "source: $SOURCE_ROOT"
+
+VAD_MODEL="$SOURCE_ROOT/assets/framework/models/silero_vad"
+SAMPLE_WAV="$SOURCE_ROOT/assets/resources/sample_16k.wav"
+SEPARATION_WAV="$SOURCE_ROOT/tests/ace_step/assets/complete_source_demucs_8s.wav"
+
 export AUDIOCPP_NATIVE_DIR="$BIN"
-cd "$REPO_ROOT"
 
-dotnet build bindings/csharp/AudioCpp.slnx -v q --nologo || exit 1
+dotnet build "$BINDINGS_ROOT/AudioCpp.slnx" -v q --nologo || exit 1
 
-run() { dotnet run --project "$1" --no-build -- "${@:2}"; }
+# Run from the engine's source tree. A family whose GGUF predates the schema-v1
+# contract -- bs_roformer is one -- resolves its spec by walking up from the
+# working directory to a model_specs/ directory, and nothing else is consulted
+# for that lookup: not the models root, not the library's own location. Running
+# from this repository instead would silently skip those families.
+cd "$SOURCE_ROOT"
+
+run() { dotnet run --project "$BINDINGS_ROOT/$1" --no-build -- "${@:2}"; }
 
 echo "threads=$THREADS"
 echo "== C# path test =="
-run bindings/csharp/AudioCpp.PathTest/AudioCpp.PathTest.csproj \
-    assets/framework/models/silero_vad assets/resources/sample_16k.wav cpu
+run tests/AudioCpp.PathTest/AudioCpp.PathTest.csproj \
+    "$VAD_MODEL" "$SAMPLE_WAV" cpu
 path_status=$?
 [ $path_status -ne 0 ] && [ $path_status -ne 77 ] && exit 1
 
@@ -65,9 +104,9 @@ echo "== C# model test =="
 # second time just to diff it would roughly double the suite's wall time.
 cs_out="$(mktemp)"
 trap 'rm -f "$cs_out" "${c_out:-}"' EXIT
-run bindings/csharp/AudioCpp.ModelTest/AudioCpp.ModelTest.csproj \
-    "$MODELS_ROOT" assets/resources/sample_16k.wav cpu \
-    tests/ace_step/assets/complete_source_demucs_8s.wav "$THREADS" | tee "$cs_out"
+run tests/AudioCpp.ModelTest/AudioCpp.ModelTest.csproj \
+    "$MODELS_ROOT" "$SAMPLE_WAV" cpu \
+    "$SEPARATION_WAV" "$THREADS" | tee "$cs_out"
 model_status=${PIPESTATUS[0]}
 [ $model_status -ne 0 ] && [ $model_status -ne 77 ] && exit 1
 [ $model_status -eq 77 ] && exit 0
@@ -84,8 +123,8 @@ fi
 echo
 echo "== C vs C# =="
 c_out="$(mktemp)"
-"$C_MODEL_TEST" "$MODELS_ROOT" assets/resources/sample_16k.wav cpu \
-    tests/ace_step/assets/complete_source_demucs_8s.wav "$THREADS" 2>/dev/null \
+"$C_MODEL_TEST" "$MODELS_ROOT" "$SAMPLE_WAV" cpu \
+    "$SEPARATION_WAV" "$THREADS" 2>/dev/null \
     | grep '^parity:' | sort > "$c_out"
 grep '^parity:' "$cs_out" | sort > "$cs_out.sorted" && mv "$cs_out.sorted" "$cs_out"
 
