@@ -96,6 +96,14 @@ coverage_status=$?
 [ $coverage_status -ne 0 ] && [ $coverage_status -ne 77 ] && exit 1
 
 echo
+# Also model-free: parses the specs and checks the install layout. Network
+# checks are opt-in, so this stays fast and offline by default.
+echo "== package catalog =="
+run tests/AudioCpp.PackageTest/AudioCpp.PackageTest.csproj
+package_status=$?
+[ $package_status -ne 0 ] && [ $package_status -ne 77 ] && exit 1
+
+echo
 echo "== C# path test =="
 run tests/AudioCpp.PathTest/AudioCpp.PathTest.csproj \
     "$VAD_MODEL" "$SAMPLE_WAV" cpu
