@@ -219,3 +219,76 @@ Upstream also caches the answer per model at registration
 `RefusesLanguage` cache here, reached from the other direction: upstream can
 ask the contract because it also has the separation, so it never needs to
 observe a refusal.
+
+## Run 6 — 2026-09-13 21:10 — streaming ASR is fed, not handed a clip
+
+**Question** — `stream=true` on `/v1/audio/transcriptions` returned 500 with the
+audio attached to the request the way the offline path attaches it.
+
+**Raw finding**
+
+```
+{"error":{"message":"audiocpp_stream_finish: Parakeet TDT buffered streaming
+  finalize() requires streamed audio (runtime error)","type":"engine_error"}}
+```
+
+A streaming session's request carries the *format*, not the samples: a
+one-frame buffer declares 16 kHz mono, and the audio arrives through
+`PushStream`. That is what `LiveTranscription.cs` in the GUI already does; the
+server route was written from the offline route's shape instead and inherited
+the wrong assumption.
+
+Pushing the clip in policy-sized windows also turns the route into a real
+stream — 6 deltas over a 14 s clip instead of one at the end.
+
+**A second finding, in the deltas themselves.** The engine's `partial_text` for
+this family is the *cumulative* transcript, and upstream forwards it verbatim
+into a field named `delta`:
+
+```
+delta: "Some call me nat"
+delta: "Some call me nature. Others call me"
+delta: "Some call me nature. Others call me Mother Nature. I've"
+```
+
+A client appending these — which is what OpenAI's `transcript.text.delta` means
+— gets `Some call me natSome call me nature…`. Filed upstream. This side
+forwards it as upstream does, and the test asserts only self-consistency: every
+delta a prefix of the final transcript, each extending the one before. That
+holds whichever convention a family follows.
+
+## Run 7 — 2026-09-13 21:40 — two vacuous checks and a fatal error handler
+
+Three things the first live-ingest run exposed, all in code I had just written.
+
+**The timing assertion measured nothing.** `ReadAsync` started its stopwatch
+when the *body* was first read, so a response that had already completed
+reported "first delta at 0 ms of 0 ms" and passed. Starting the clock before
+the request is sent gave the real number — first delta at 1198 ms of 1407 ms.
+
+That number then showed the assertion was wrong anyway. Parakeet TDT is a
+*buffered* streaming family: it accumulates and emits most deltas near the end,
+so "the first delta lands in the first 90%" was measuring the model and sat 3%
+from failing on a different machine. The route's actual responsibility is
+flushing as produced, so the check is now that the deltas do not all share one
+arrival time — 4 deltas over 159 ms for live ingest, which a buffering server
+could not produce.
+
+**The mid-stream error handler destroyed the connection it was explaining.** A
+body ending mid-frame is detected after the SSE stream has started, and the
+handler called `Sse.Begin`, which sets status and headers — illegal once a byte
+is out. It threw inside the catch, the connection was torn down, and the client
+reported `The response ended prematurely`. Which is exactly the failure the
+error event exists to prevent: a truncated transcript indistinguishable from a
+finished one. `Sse.Attach` writes to an already-started stream, and the client
+now sees an `error` event and no `[DONE]`.
+
+**Comparing across modes tested the model.** "Live ingest transcribes what the
+file route does" compared streaming output against offline output, and the same
+model in streaming mode capitalises differently (`nature` vs `Nature`). The
+comparison now runs live against the file-backed *stream*, so the transport is
+the only variable.
+
+**Not verified:** `/v1/audio/speech/live` with real audio. It needs an s2s
+model in streaming mode (personaplex), which is not on this machine. Its
+request handling and guards are covered; its audio path is not.

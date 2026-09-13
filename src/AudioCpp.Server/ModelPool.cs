@@ -47,6 +47,9 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
     /// <summary>Whether this server allows models to be added or removed.</summary>
     public bool ManagementEnabled => config.UiManagement;
 
+    /// <summary>Bounds the live routes hold their connections to.</summary>
+    public LiveIngestLimits LiveIngest => config.LiveIngest;
+
     /// <summary>
     /// Adds a model, or reconfigures one already registered under that id.
     /// </summary>
@@ -263,8 +266,28 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
     /// Run something against a model's session, with the model loaded if it is
     /// not already and nothing else using it.
     /// </summary>
-    public async Task<T> UseAsync<T>(string id, Func<AudioCppSession, T> work,
-                                     CancellationToken cancel = default)
+    public Task<T> UseAsync<T>(string id, Func<AudioCppSession, T> work,
+                               CancellationToken cancel = default) =>
+        UseStreamingAsync(id, session => Task.FromResult(work(session)), cancel);
+
+    /// <summary>
+    /// As <see cref="UseAsync"/>, for work that awaits while it holds the
+    /// model — a streaming response writing to a client between events.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately named apart rather than overloaded: a lambda whose body
+    /// returns a Task binds to either signature, and picking the synchronous
+    /// one would run the whole stream inside the gate and then release it
+    /// before a byte had been written. Named separately, the choice is made by
+    /// the caller instead of by overload resolution.
+    ///
+    /// The gate is held for the full response, which is the point: a streaming
+    /// run owns the model until it finishes. It is also why the live routes are
+    /// bounded — a client that stops reading would otherwise hold the model
+    /// open for as long as it liked.
+    /// </remarks>
+    public async Task<T> UseStreamingAsync<T>(string id, Func<AudioCppSession, Task<T>> work,
+                                              CancellationToken cancel = default)
     {
         var spec = Spec(id) ?? throw new KeyNotFoundException($"no model with id '{id}'");
         var entry = _entries.GetOrAdd(id, _ => new Entry(spec));
@@ -286,7 +309,7 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
                 log($"loaded {id} ({entry.Model.Family}) in "
                     + $"{(DateTime.UtcNow - started).TotalMilliseconds:F0} ms");
             }
-            return work(entry.Session);
+            return await work(entry.Session);
         }
         finally
         {
