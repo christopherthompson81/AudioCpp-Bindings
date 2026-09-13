@@ -191,6 +191,21 @@ internal static class LiveCheck
                     }
                 }
 
+                // Open the real save dialog for one file name, so what the
+                // platform actually shows can be looked at. The mapping is
+                // covered by --save-check; this is the part that needs eyes.
+                if (args.FirstOrDefault(a => a.StartsWith("save-dialog="))?["save-dialog=".Length..]
+                    is { } saveName)
+                {
+                    // The dialog needs the window it parents to, which is shown
+                    // after this runs.
+                    await Task.Delay(1500);
+                    Console.WriteLine($"opening save dialog for {saveName}");
+                    var picked = await viewModel.PickSavePath!(saveName);
+                    Console.WriteLine($"picked: {picked ?? "(cancelled)"}");
+                    return;
+                }
+
                 if (args.Contains("--shot"))
                 {
                     // Screenshot each task so the control layout can be compared.

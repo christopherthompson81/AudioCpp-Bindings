@@ -62,12 +62,17 @@ public partial class MainWindow : Window
 
     private async Task<string?> PickSavePathAsync(string suggested)
     {
+        var kind = SaveKind.For(suggested);
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "Save generated audio",
+            Title = kind.Title,
             SuggestedFileName = suggested,
-            DefaultExtension = "wav",
-            FileTypeChoices = [new FilePickerFileType("WAV audio") { Patterns = ["*.wav"] }],
+            DefaultExtension = kind.Extension,
+            FileTypeChoices =
+            [
+                new FilePickerFileType(kind.Description) { Patterns = [kind.Pattern] },
+                new FilePickerFileType("All files") { Patterns = ["*"] },
+            ],
         });
         return file?.Path.LocalPath;
     }

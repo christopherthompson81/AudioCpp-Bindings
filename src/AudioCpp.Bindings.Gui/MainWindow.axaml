@@ -481,7 +481,7 @@
                                      Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
                                      HorizontalAlignment="Stretch" />
                       <TextBox Grid.Column="2" IsVisible="{Binding IsText}"
-                               Text="{Binding Value}" Watermark="{Binding DefaultDisplay}" />
+                               Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}" />
                     </Grid>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -510,7 +510,7 @@
                                        Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
                                        HorizontalAlignment="Stretch" />
                         <TextBox Grid.Column="2" IsVisible="{Binding IsText}"
-                                 Text="{Binding Value}" Watermark="{Binding DefaultDisplay}" />
+                                 Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}" />
                       </Grid>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
