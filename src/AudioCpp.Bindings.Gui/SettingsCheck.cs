@@ -161,6 +161,33 @@ internal static class SettingsCheck
                 }
             }
 
+            // A model loaded from a path is its own choice. Restoring a
+            // remembered package must not overwrite it: selecting a package
+            // sets ModelPath as a side effect, and that side effect is right
+            // when a person clicks, wrong when it happens during a load that is
+            // also restoring a saved path.
+            var manual = new MainWindowViewModel(new SettingsStore(directory));
+            manual.CurrentWorkflow = "asr";
+            // An installed one: only an installed package sets ModelPath, so
+            // picking any entry would pass this without exercising the clobber.
+            var installed = manual.CatalogEntries.FirstOrDefault(e => e.IsInstalled);
+            if (installed is null)
+            {
+                Console.WriteLine("  no installed package; the model-path clobber is not staged");
+            }
+            manual.SelectedEntry = installed ?? manual.CatalogEntries.FirstOrDefault();
+            manual.ModelPath = "/models/hand-picked.gguf";
+            Thread.Sleep(1200);
+
+            var reloaded = new MainWindowViewModel(new SettingsStore(directory));
+            Console.WriteLine($"  saved path '/models/hand-picked.gguf' came back as "
+                              + $"'{reloaded.ModelPath}'");
+            if (installed is not null && reloaded.ModelPath != "/models/hand-picked.gguf")
+            {
+                Console.Error.WriteLine("restoring the package overwrote the saved model path");
+                failures++;
+            }
+
             // 5. Reading settings must not itself write settings: applying a
             //    saved value raises PropertyChanged like any other assignment,
             //    and a save from inside the load would race the file it read.

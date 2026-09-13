@@ -516,8 +516,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             _selectedPackages[_workflow] = value.Key;
             Notify(nameof(SelectedPackages));
 
-            FamilyHint = value.Family.Family;
-            if (value.IsInstalled) ModelPath = value.ResolvePath(ModelsRoot);
+            // Choosing a package points the loader at it. Restoring a
+            // remembered one must not: the family hint and the model path are
+            // saved in their own right, and a person who last pointed at a
+            // hand-picked .gguf would get the package's path back instead.
+            if (!_applyingSettings)
+            {
+                FamilyHint = value.Family.Family;
+                if (value.IsInstalled) ModelPath = value.ResolvePath(ModelsRoot);
+            }
+
             // The model decides which of the workflow's tasks this run is.
             ResolveTask();
         }
