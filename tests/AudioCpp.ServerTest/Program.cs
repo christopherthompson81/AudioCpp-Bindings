@@ -92,5 +92,22 @@ else
     Console.WriteLine("\nno AUDIOCPP_TTS_MODEL; skipping the routes that need one");
 }
 
+var asrModel = Environment.GetEnvironmentVariable("AUDIOCPP_ASR_MODEL");
+var asrAudio = Environment.GetEnvironmentVariable("AUDIOCPP_ASR_AUDIO");
+if (asrModel is { Length: > 0 } && asrAudio is { Length: > 0 } && File.Exists(asrAudio)
+    && (File.Exists(asrModel) || Directory.Exists(asrModel)))
+{
+    Console.WriteLine();
+    failures += await AudioCpp.ServerTest.Transcription.RunAsync(
+        asrModel,
+        Environment.GetEnvironmentVariable("AUDIOCPP_ASR_FAMILY") ?? "",
+        Environment.GetEnvironmentVariable("AUDIOCPP_BACKEND") ?? "cpu",
+        asrAudio);
+}
+else
+{
+    Console.WriteLine("no AUDIOCPP_ASR_MODEL/AUDIOCPP_ASR_AUDIO; skipping transcription");
+}
+
 Console.WriteLine(failures == 0 ? "server OK" : $"server: {failures} failure(s)");
 return failures == 0 ? 0 : 1;
