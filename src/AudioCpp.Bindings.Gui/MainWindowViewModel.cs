@@ -60,6 +60,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _timingBreakdown = "";
     private string _page = "Studio";
     private string _theme = "System";
+    private string _language = "English";
     private readonly VoiceLibrary _voices = new();
     private SavedVoice? _selectedVoice;
     private string _voiceAudioPath = "";
@@ -323,6 +324,35 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<string> Themes { get; } = ["System", "Light", "Dark"];
 
+    public IReadOnlyList<string> Languages => Resources.Loc.Available;
+
+    /// <summary>
+    /// Interface language. The pseudo-locale is not a translation — it is
+    /// English with brackets and accents, which makes an unextracted string
+    /// obvious and shows where a layout assumed English width.
+    /// </summary>
+    public string Language
+    {
+        get => _language;
+        set
+        {
+            if (!Set(ref _language, value)) return;
+            Resources.Loc.Use(value);
+            // Task titles and blurbs are computed, so they need a nudge too.
+            Notify(nameof(TaskTitle));
+            Notify(nameof(TaskBlurb));
+            RebuildTaskChips();
+        }
+    }
+
+    private void RebuildTaskChips()
+    {
+        for (var i = 0; i < TaskChips.Count; i++)
+        {
+            TaskChips[i] = TaskChips[i] with { Title = TitleFor(TaskChips[i].Task) };
+        }
+    }
+
     /// <summary>Reference voices kept on disk between sessions.</summary>
     public ObservableCollection<SavedVoice> Voices { get; } = [];
 
@@ -580,16 +610,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public string CatalogCount =>
         $"{CatalogEntries.Count} package(s) for {_task}, {AllEntries.Count} in all.";
 
-    private static string TitleFor(string task) => task switch
-    {
-        "asr" => "ASR / Transcription",
-        "tts" => "Text to speech",
-        "vad" => "Voice activity",
-        "diar" => "Diarisation",
-        "sep" => "Source separation",
-        "align" => "Forced alignment",
-        _ => task,
-    };
+    private static string TitleFor(string task) => Resources.Strings.TaskChip(task);
 
     /// <summary>
     /// The structured result as JSON, which the web UI shows beside the plain
@@ -625,27 +646,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>Headline for the current task, as the web UI's hero block shows it.</summary>
-    public string TaskTitle => _task switch
-    {
-        "asr" => "Transcription",
-        "tts" => "Text to speech",
-        "vad" => "Voice activity",
-        "diar" => "Diarisation",
-        "sep" => "Source separation",
-        "align" => "Forced alignment",
-        _ => _task,
-    };
+    public string TaskTitle => Resources.Strings.TaskTitle(_task);
 
-    public string TaskBlurb => _task switch
-    {
-        "asr" => "Transcribe spoken audio into text, with language and timestamp controls when supported.",
-        "tts" => "Generate speech from text, with voice presets and cloning when supported.",
-        "vad" => "Find the stretches of a recording that contain speech.",
-        "diar" => "Attribute speech to speakers across a recording.",
-        "sep" => "Split a mixture into its constituent sources.",
-        "align" => "Align a known transcript to the audio it was spoken in.",
-        _ => "",
-    };
+    public string TaskBlurb => Resources.Strings.TaskBlurb(_task);
 
     public string TaskBadge => _task.ToUpperInvariant();
 
