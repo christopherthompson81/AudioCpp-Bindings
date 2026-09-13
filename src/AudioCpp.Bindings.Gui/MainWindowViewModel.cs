@@ -86,8 +86,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private double _lastRunSeconds;
     private string _segmentedSummary = "";
 
-    public MainWindowViewModel()
+    public MainWindowViewModel(SettingsStore? settings = null)
     {
+        _settings = settings ?? new SettingsStore();
         LoadCommand = new RelayCommand(LoadAsync, () => !_busy && ModelPath.Length > 0);
         RunCommand = new RelayCommand(RunAsync, () => !_busy && _isLoaded);
         SaveWavCommand = new RelayCommand(SaveWavAsync, () => !_busy && _outputSamples is { Length: > 0 });
@@ -124,6 +125,144 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         LoadCatalog();
         LoadCaptureDevices();
+
+        ApplySettings(_settings.Load());
+        // Subscribed rather than calling a save from each setter: there are
+        // twenty of them, and the one a future property forgets is the one that
+        // silently stops being remembered. PersistedProperties is checked
+        // against the type by --settings-check, so a renamed property fails
+        // loudly instead of quietly.
+        PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is { } name && PersistedProperties.Contains(name)) QueueSave();
+        };
+    }
+
+    private readonly SettingsStore _settings;
+    private bool _applyingSettings;
+    private CancellationTokenSource? _saveDebounce;
+
+    /// <summary>Properties whose value survives a restart.</summary>
+    internal static readonly HashSet<string> PersistedProperties =
+    [
+        nameof(Task), nameof(Theme), nameof(Language), nameof(Backend), nameof(Threads),
+        nameof(ModelPath), nameof(FamilyHint), nameof(ModelsRoot),
+        nameof(VadModelPath), nameof(VadAssetPath), nameof(MinSegmentSpan), nameof(MaxSegmentSpan),
+        nameof(UseBuiltInChunking), nameof(ChunkSeconds), nameof(SplitLongText), nameof(ChunkBudget),
+        nameof(AudioPath), nameof(VoiceId), nameof(ShowAllOptions),
+    ];
+
+    /// <summary>Where settings are kept, so a user can find or delete the file.</summary>
+    public string SettingsPath => _settings.StorePath;
+
+    internal Settings Capture() => new()
+    {
+        Task = Task,
+        Theme = Theme,
+        Language = Language,
+        Backend = Backend,
+        Threads = Threads,
+        ModelPath = ModelPath,
+        FamilyHint = FamilyHint,
+        ModelsRoot = ModelsRoot,
+        VadModelPath = VadModelPath,
+        VadAssetPath = VadAssetPath,
+        MinSegmentSpan = MinSegmentSpan,
+        MaxSegmentSpan = MaxSegmentSpan,
+        UseBuiltInChunking = UseBuiltInChunking,
+        ChunkSeconds = ChunkSeconds,
+        SplitLongText = SplitLongText,
+        ChunkBudget = ChunkBudget,
+        AudioPath = AudioPath,
+        VoiceId = VoiceId,
+        ShowAllOptions = ShowAllOptions,
+    };
+
+    /// <summary>
+    /// Put a saved settings file back into the window.
+    /// </summary>
+    /// <remarks>
+    /// Absent means "leave the default", which is why every field is nullable:
+    /// a file from an older build has no entry for the newest setting, and
+    /// writing a null over a working default would be worse than not restoring
+    /// it at all.
+    ///
+    /// A saved language wins over the machine's, which the selector otherwise
+    /// follows: choosing a language is a decision, and a decision outranks a
+    /// guess made from the locale.
+    /// </remarks>
+    internal void ApplySettings(Settings saved)
+    {
+        _applyingSettings = true;
+        try
+        {
+            if (saved.Task is { Length: > 0 } task && Tasks.Contains(task)) Task = task;
+            if (saved.Theme is { Length: > 0 } theme) Theme = theme;
+            if (saved.Language is { Length: > 0 } language
+                && Resources.Loc.Available.Contains(language)) Language = language;
+            if (saved.Backend is { Length: > 0 } backend) Backend = backend;
+            if (saved.Threads is { } threads and > 0) Threads = threads;
+
+            if (saved.ModelPath is { } modelPath) ModelPath = modelPath;
+            if (saved.FamilyHint is { } family) FamilyHint = family;
+            if (saved.ModelsRoot is { Length: > 0 } root) ModelsRoot = root;
+
+            if (saved.VadModelPath is { } vad) VadModelPath = vad;
+            if (saved.VadAssetPath is { } asset) VadAssetPath = asset;
+            if (saved.MinSegmentSpan is { } min and > 0) MinSegmentSpan = min;
+            if (saved.MaxSegmentSpan is { } max and > 0) MaxSegmentSpan = max;
+
+            if (saved.UseBuiltInChunking is { } builtIn) UseBuiltInChunking = builtIn;
+            if (saved.ChunkSeconds is { } chunkSeconds and > 0) ChunkSeconds = chunkSeconds;
+            if (saved.SplitLongText is { } split) SplitLongText = split;
+            if (saved.ChunkBudget is { } budget and > 0) ChunkBudget = budget;
+
+            // Only if it is still there. A path to a file that has been moved
+            // reads as the app being broken rather than as the file being gone.
+            if (saved.AudioPath is { Length: > 0 } audio && File.Exists(audio)) AudioPath = audio;
+            if (saved.VoiceId is { } voiceId) VoiceId = voiceId;
+            if (saved.ShowAllOptions is { } showAll) ShowAllOptions = showAll;
+        }
+        finally
+        {
+            _applyingSettings = false;
+        }
+
+        if (_settings.LoadProblem is { } problem)
+        {
+            Log("settings", $"Could not read saved settings, using defaults — {problem}");
+        }
+    }
+
+    /// <summary>
+    /// Write the settings shortly after the last change.
+    /// </summary>
+    /// <remarks>
+    /// Debounced because a spinner or a text box raises a change per keystroke,
+    /// and the value is snapshotted on the caller's thread rather than read
+    /// later from the timer: reading view-model state off the UI thread is how
+    /// a half-applied set of settings gets written.
+    /// </remarks>
+    private void QueueSave()
+    {
+        if (_applyingSettings) return;
+
+        var snapshot = Capture();
+        _saveDebounce?.Cancel();
+        _saveDebounce?.Dispose();
+        var debounce = new CancellationTokenSource();
+        _saveDebounce = debounce;
+        _ = System.Threading.Tasks.Task.Run(async () =>
+        {
+            try { await System.Threading.Tasks.Task.Delay(400, debounce.Token); }
+            // Disposed as well as cancelled: the next change disposes this
+            // source, and it can be gone before the delay notices it was
+            // cancelled. Both mean the same thing -- a newer snapshot is on
+            // its way, so drop this one.
+            catch (Exception exception) when (exception is OperationCanceledException
+                                              or ObjectDisposedException) { return; }
+            _settings.Save(snapshot);
+        });
     }
 
     public RelayCommand LoadCommand { get; }
@@ -1376,9 +1515,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var configured = Environment.GetEnvironmentVariable("AUDIOCPP_MODELS_ROOT");
         if (configured is { Length: > 0 }) return configured;
 
+        // Same empty-folder hazard as the settings store: a relative path here
+        // would download models beside whatever directory the app started in.
         return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "audiocpp", "models");
+            AppData.Root(Environment.SpecialFolder.LocalApplicationData, "audiocpp"), "models");
     }
 
     /// <summary>

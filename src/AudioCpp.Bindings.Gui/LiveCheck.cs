@@ -207,6 +207,8 @@ internal static class LiveCheck
                     return;
                 }
 
+                Console.WriteLine($"settings: {viewModel.SettingsPath}");
+
                 if (args.Contains("--shot"))
                 {
                     // Screenshot each task so the control layout can be compared.
@@ -291,8 +293,11 @@ internal static class LiveCheck
                         await Task.Delay(500);
                     }
 
-                    var task = args.FirstOrDefault(a => a.StartsWith("task="))?["task=".Length..] ?? "asr";
-                    viewModel.Task = task;
+                    // Left alone when not given, so a screenshot can show what
+                    // the saved settings restored rather than what this forced.
+                    var task = args.FirstOrDefault(a => a.StartsWith("task="))?["task=".Length..];
+                    if (task is not null) viewModel.Task = task;
+                    task = viewModel.Task;
                     await Task.Delay(400);
                     Console.WriteLine($"{task}: text={viewModel.ShowText} voice={viewModel.ShowVoice} "
                                       + $"audio={viewModel.ShowAudioInput} asrExtras={viewModel.ShowAsrAudioControls} "
