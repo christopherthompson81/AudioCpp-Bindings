@@ -647,8 +647,18 @@
                       <DataTemplate x:DataType="vm:ArtifactEntry">
                         <Border Classes="Card" Padding="12" Margin="0,0,0,8">
                           <StackPanel Spacing="4">
-                            <TextBlock Text="{Binding Id}" Classes="Label" />
-                            <TextBlock Text="{Binding Summary}" Classes="Subtle" FontSize="11" />
+                            <Grid ColumnDefinitions="*,Auto">
+                              <StackPanel Grid.Column="0" Spacing="2">
+                                <TextBlock Text="{Binding Id}" Classes="Label" />
+                                <TextBlock Text="{Binding Summary}" Classes="Subtle" FontSize="11" />
+                              </StackPanel>
+                              <!-- For audio-to-MIDI the artifact is the result:
+                                   a .mid file that could be previewed but not
+                                   taken out of the app. -->
+                              <Button Grid.Column="1" VerticalAlignment="Top"
+                                      Content="{Binding [action.save], Source={x:Static res:Loc.Current}}"
+                                      Click="OnSaveArtifact" Tag="{Binding}" />
+                            </Grid>
                             <TextBox Text="{Binding Preview}" IsReadOnly="True" MaxHeight="150"
                                      AcceptsReturn="True" TextWrapping="Wrap" FontSize="11" />
                           </StackPanel>

@@ -35,6 +35,7 @@ internal static class Program
                          ("transcript.srt", "Save subtitles", "SubRip subtitles", "srt"),
                          ("transcript.vtt", "Save subtitles", "WebVTT subtitles", "vtt"),
                          ("result.json", "Save data", "JSON", "json"),
+                         ("result.mid", "Save MIDI", "MIDI file", "mid"),
                          ("notes.unknown", "Save file", "UNKNOWN", "unknown"),
                      })
             {

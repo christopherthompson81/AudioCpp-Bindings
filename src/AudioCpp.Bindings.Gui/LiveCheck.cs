@@ -273,6 +273,65 @@ internal static class LiveCheck
                     // output, so the transport has to be pointed at one. Play
                     // routes through the same player as everything else, which
                     // is why the playhead applies to whatever the rows chose.
+                    // The artifact is the result for audio-to-MIDI, so it has to
+                    // be nameable and savable, and the panel has to open on it
+                    // rather than on 840 JSON objects in the transcript field.
+                    if (args.Contains("--artifact-check"))
+                    {
+                        Console.WriteLine($"artifacts {viewModel.Artifacts.Count}, "
+                                          + $"transcript {viewModel.Transcript.Length} char(s), "
+                                          + $"tab {viewModel.ResultTab} (3 = artifacts)");
+                        if (viewModel.Artifacts.Count == 0)
+                        {
+                            Console.Error.WriteLine("no artifact to check"); failures++;
+                        }
+                        else
+                        {
+                            foreach (var artifact in viewModel.Artifacts)
+                            {
+                                var kind = SaveKind.For(artifact.SuggestedFileName);
+                                Console.WriteLine($"  {artifact.Id,-10} -> {artifact.SuggestedFileName,-16} "
+                                                  + $"{kind.Title} / {kind.Description} / {kind.Pattern}");
+                                // A .mid that is not a MIDI file would still save,
+                                // still preview, and still be wrong. MThd is the
+                                // header every standard MIDI file starts with.
+                                if (artifact.SuggestedFileName.EndsWith(".mid", StringComparison.Ordinal))
+                                {
+                                    var magic = artifact.Payload.Length >= 4
+                                        ? System.Text.Encoding.ASCII.GetString(artifact.Payload, 0, 4)
+                                        : "";
+                                    Console.WriteLine($"    header '{magic}', {artifact.Payload.Length} bytes");
+                                    if (magic != "MThd")
+                                    {
+                                        Console.Error.WriteLine("    not a standard MIDI file");
+                                        failures++;
+                                    }
+                                }
+
+                                if (args.FirstOrDefault(a => a.StartsWith("artifactsOut="))
+                                        ?["artifactsOut=".Length..] is { } outDir)
+                                {
+                                    var target = System.IO.Path.Combine(outDir, artifact.SuggestedFileName);
+                                    await File.WriteAllBytesAsync(target, artifact.Payload);
+                                    Console.WriteLine($"    wrote {target}");
+                                }
+
+                                if (artifact.SuggestedFileName.EndsWith(".bin", StringComparison.Ordinal))
+                                {
+                                    Console.Error.WriteLine($"  {artifact.Id}: no extension from the model");
+                                    failures++;
+                                }
+                            }
+                            if (viewModel.ResultTab != 3)
+                            {
+                                Console.Error.WriteLine("did not open on the artifact"); failures++;
+                            }
+                        }
+                        Console.WriteLine(failures == 0 ? "artifacts OK" : $"artifacts: {failures} failure(s)");
+                        Environment.Exit(failures == 0 ? 0 : 1);
+                        return;
+                    }
+
                     if (args.Contains("--stream-check"))
                     {
                         if (viewModel.OutputStreams.Count < 2)

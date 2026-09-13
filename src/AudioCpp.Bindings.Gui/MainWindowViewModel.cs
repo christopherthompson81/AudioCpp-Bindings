@@ -845,8 +845,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// </remarks>
     public int ResultTab { get => _resultTab; set => Set(ref _resultTab, value); }
 
+    /// <summary>
+    /// Whether the transcript is machine-readable rather than something to
+    /// read.
+    /// </summary>
+    /// <remarks>
+    /// Audio-to-MIDI returns its note events as text: 840 JSON objects in the
+    /// transcript field. Opening the panel on that shows a wall of JSON where
+    /// the .mid file beside it is what the user wanted.
+    /// </remarks>
+    private bool TranscriptIsData =>
+        Transcript.StartsWith('[') || Transcript.StartsWith('{');
+
     private void SelectResultTab() =>
-        ResultTab = Transcript.Length > 0 ? 0
+        ResultTab = Artifacts.Count > 0 && (Transcript.Length == 0 || TranscriptIsData) ? 3
+            : Transcript.Length > 0 ? 0
             : OutputStreams.Count > 0 ? 2
             : Artifacts.Count > 0 ? 3
             : Rows.Count > 0 ? 1
@@ -2540,6 +2553,31 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return format == "vtt" ? Subtitles.ToVtt(cues) : Subtitles.ToSrt(cues);
     }
 
+    /// <summary>
+    /// Write one of a run's artifacts.
+    /// </summary>
+    /// <remarks>
+    /// For audio-to-MIDI the artifact is the whole result — a .mid file — and
+    /// it could be previewed but not saved, which is the same gap the
+    /// separation stems had.
+    /// </remarks>
+    public async Task SaveArtifactAsync(ArtifactEntry artifact)
+    {
+        if (PickSavePath is null) return;
+        var path = await PickSavePath(artifact.SuggestedFileName);
+        if (path is null) return;
+
+        try
+        {
+            await File.WriteAllBytesAsync(path, artifact.Payload);
+            Status = $"Wrote {path}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Status = Describe(exception);
+        }
+    }
+
     /// <summary>Write one of a run's named streams, for a separation result's stems.</summary>
     public async Task SaveStreamAsync(NamedAudioEntry stream)
     {
@@ -2908,6 +2946,31 @@ public sealed record ArtifactEntry(string Id, string Kind, byte[] Payload, strin
 {
     public string Summary => $"{Kind} · {Payload.Length} bytes"
                              + (Metadata.Length > 0 ? $" · {Metadata}" : "");
+
+    /// <summary>
+    /// A filename to suggest when saving this.
+    /// </summary>
+    /// <remarks>
+    /// The extension comes from the model's own metadata where it gives one —
+    /// audio-to-MIDI reports extension=mid — because the payload is the point
+    /// of that task and guessing its type from the bytes would be worse than
+    /// reading what the model said.
+    /// </remarks>
+    public string SuggestedFileName
+    {
+        get
+        {
+            foreach (var pair in Metadata.Split(", ", StringSplitOptions.RemoveEmptyEntries))
+            {
+                var split = pair.Split('=', 2);
+                if (split.Length == 2 && split[0].Trim() == "extension" && split[1].Length > 0)
+                {
+                    return $"{Id}.{split[1].Trim()}";
+                }
+            }
+            return $"{Id}.bin";
+        }
+    }
 
     /// <summary>Text artifacts are worth showing inline; binary ones are not.</summary>
     public string Preview
