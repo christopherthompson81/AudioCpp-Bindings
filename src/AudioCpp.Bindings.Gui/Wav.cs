@@ -1,4 +1,4 @@
-namespace AudioCpp.Demo;
+namespace AudioCpp.Bindings.Gui;
 
 /// <summary>Minimal 16-bit PCM WAV read/write, so the sample needs no audio package.</summary>
 internal static class Wav

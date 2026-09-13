@@ -14,7 +14,7 @@ bindings out, and the maintainer would rather not carry them.
 | `src/AudioCpp` | the binding — `net10.0`, AOT-compatible, no package references |
 | `tests/AudioCpp.PathTest` | the ABI contract, offline and streaming |
 | `tests/AudioCpp.ModelTest` | real families across five task types |
-| `samples/AudioCpp.Demo` | an Avalonia 12 app driving the ABI |
+| `src/AudioCpp.Bindings.Gui` | an Avalonia 12 app driving the ABI |
 | `scripts/run-tests.sh` | runs both tests and checks they agree with the C tests |
 
 ## Prerequisites
@@ -37,7 +37,7 @@ python3 tools/model_manager_v2.py install kokoro_82m_q8_0 --models-root /path/to
 
 ```bash
 export AUDIOCPP_NATIVE_DIR=/path/to/audio.cpp/build/bin
-dotnet run --project samples/AudioCpp.Demo
+dotnet run --project src/AudioCpp.Bindings.Gui
 ```
 
 Load a model, and the left pane fills in from the model itself — family, capabilities,
@@ -55,7 +55,7 @@ A GUI cannot be driven headlessly, so the same view model has a `--smoke` entry 
 that exercises every ABI call without a window:
 
 ```bash
-dotnet run --project samples/AudioCpp.Demo -- --smoke \
+dotnet run --project src/AudioCpp.Bindings.Gui -- --smoke \
     /path/to/models/Kokoro-82M-GGUF/kokoro-82m-q8_0.gguf "" tts kokoro_tts
 ```
 

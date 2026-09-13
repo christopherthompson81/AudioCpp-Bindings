@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Text;
 using System.Runtime.CompilerServices;
 using AudioCpp.Native;
+using AudioCpp.Packages;
 
-namespace AudioCpp.Demo;
+namespace AudioCpp.Bindings.Gui;
 
 /// <summary>
 /// Drives the sample. Everything here goes through the C ABI: the model is loaded
@@ -28,6 +30,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private bool _useBuiltInChunking = true;
     private double _chunkSeconds = 10;
     private string _vadAssetPath = "";
+    private string _resultJson = "";
+    private readonly PackageInstaller _installer = new();
+    private CatalogEntry? _selectedEntry;
+    private string _modelsRoot = DefaultModelsRoot();
+    private double _installFraction;
+    private string _installStatus = "";
+    private bool _splitLongText = true;
+    private int _chunkBudget = 1000;
+    private readonly List<AudioSegment> _segments = [];
+    private CancellationTokenSource? _cancel;
     private string _task = "asr";
     private string _audioPath = "";
     private string _text = "The quick brown fox jumps over the lazy dog.";
@@ -51,11 +63,39 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         LoadCommand = new RelayCommand(LoadAsync, () => !_busy && ModelPath.Length > 0);
         RunCommand = new RelayCommand(RunAsync, () => !_busy && _isLoaded);
         SaveWavCommand = new RelayCommand(SaveWavAsync, () => !_busy && _outputSamples is { Length: > 0 });
+        CancelCommand = new RelayCommand(CancelAsync, () => _busy && _cancel is not null);
+
+        // Present before any model is loaded, as the web UI's are. Counts fill in
+        // on load; an empty row would read as a broken layout rather than an
+        // unloaded one.
+        foreach (var task in Tasks) TaskChips.Add(new TaskChip(task, TitleFor(task), 0));
+
+        InstallCommand = new RelayCommand(
+            InstallAsync, () => !_busy && _selectedEntry is { IsInstalled: false }
+                                && _selectedEntry.Package.Download.Supported);
+        DeleteCommand = new RelayCommand(
+            DeleteAsync, () => !_busy && _selectedEntry is { State: not InstallState.Missing });
+
+        LoadCatalog();
     }
 
     public RelayCommand LoadCommand { get; }
     public RelayCommand RunCommand { get; }
     public RelayCommand SaveWavCommand { get; }
+
+    /// <summary>
+    /// Stops a run between segments. A single audiocpp_session_run() cannot be
+    /// interrupted -- the call is synchronous and the ABI offers no abort -- so
+    /// this takes effect only where a run is a loop: VAD-segmented ASR, and
+    /// long-text synthesis. Disabled when there is nothing loop-shaped to stop.
+    /// </summary>
+    public RelayCommand CancelCommand { get; }
+
+    /// <summary>Fetch the selected package's files.</summary>
+    public RelayCommand InstallCommand { get; }
+
+    /// <summary>Remove an installed package's files from the models root.</summary>
+    public RelayCommand DeleteCommand { get; }
 
     /// <summary>Set by the view so file pickers can be opened from here.</summary>
     public Func<string, bool, Task<string?>>? PickPath { get; set; }
@@ -65,6 +105,66 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<string> Backends { get; } = ["cpu", "cuda", "hip", "vulkan", "metal", "best"];
     public IReadOnlyList<string> Tasks { get; } = ["asr", "tts", "vad", "diar", "sep", "align"];
+
+    /// <summary>
+    /// The task selector along the top. Count is how many of the loaded model's
+    /// tasks match -- 0 or 1 here, since this app holds one model, where the web
+    /// UI counts across a whole catalog. Same shape, honest number.
+    /// </summary>
+    public ObservableCollection<TaskChip> TaskChips { get; } = [];
+
+    public TaskChip? SelectedChip
+    {
+        get => TaskChips.FirstOrDefault(c => c.Task == _task);
+        set { if (value is not null) Task = value.Task; }
+    }
+
+    /// <summary>Every installable package, read from audio.cpp's model_specs.</summary>
+    public List<CatalogEntry> AllEntries { get; } = [];
+
+    /// <summary>
+    /// The packages the picker shows: those whose family declares the selected
+    /// task. Listing all 235 regardless meant scrolling past 37 TTS models to
+    /// find an ASR one.
+    /// </summary>
+    public ObservableCollection<CatalogEntry> CatalogEntries { get; } = [];
+
+    /// <summary>
+    /// Picking a package fills in the path and family, which is the whole point:
+    /// the reference UI is a dropdown where this app had a path box.
+    /// </summary>
+    public CatalogEntry? SelectedEntry
+    {
+        get => _selectedEntry;
+        set
+        {
+            if (!Set(ref _selectedEntry, value)) return;
+            InstallCommand.RaiseCanExecuteChanged();
+            DeleteCommand.RaiseCanExecuteChanged();
+            Notify(nameof(SelectedSummary));
+            if (value is null) return;
+
+            FamilyHint = value.Family.Family;
+            if (value.IsInstalled) ModelPath = value.ResolvePath(ModelsRoot);
+        }
+    }
+
+    public string ModelsRoot
+    {
+        get => _modelsRoot;
+        set { if (Set(ref _modelsRoot, value)) RefreshCatalogState(); }
+    }
+
+    /// <summary>0 to 1 while installing; drives the progress bar.</summary>
+    public double InstallFraction { get => _installFraction; private set => Set(ref _installFraction, value); }
+
+    public string InstallStatus { get => _installStatus; private set => Set(ref _installStatus, value); }
+
+    public string SelectedSummary => _selectedEntry is null
+        ? "No package selected"
+        : _selectedEntry.Note.Length > 0
+            ? _selectedEntry.Note
+            : $"{_selectedEntry.StateText}   {_selectedEntry.SizeText}".Trim();
 
     /// <summary>Whatever the loaded family declares, read at runtime rather than hardcoded.</summary>
     public ObservableCollection<DeclaredOption> Options { get; } = [];
@@ -77,7 +177,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public string FamilyHint { get => _familyHint; set => Set(ref _familyHint, value); }
-    public string Backend { get => _backend; set => Set(ref _backend, value); }
+    public string Backend
+    {
+        get => _backend;
+        set { if (Set(ref _backend, value)) Notify(nameof(BackendBadge)); }
+    }
     public int Threads { get => _threads; set => Set(ref _threads, value); }
 
     /// <summary>Let the engine segment on speech rather than handing it the whole clip.</summary>
@@ -98,9 +202,144 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Seconds per chunk. The engine's own default of 2 slices mid-utterance.</summary>
     public double ChunkSeconds { get => _chunkSeconds; set => Set(ref _chunkSeconds, value); }
 
+    /// <summary>
+    /// Synthesise long text in pieces and join the result, rather than handing a
+    /// family more text than it can take in one request.
+    /// </summary>
+    public bool SplitLongText { get => _splitLongText; set => Set(ref _splitLongText, value); }
+
+    /// <summary>Characters per piece. Defaults per family, as the reference does.</summary>
+    public int ChunkBudget { get => _chunkBudget; set => Set(ref _chunkBudget, value); }
+
+    /// <summary>
+    /// The pieces of the last synthesis, kept rather than only the joined clip:
+    /// per-segment audio is what a caption or dubbing workflow actually needs.
+    /// </summary>
+    public IReadOnlyList<AudioSegment> Segments => _segments;
+
     /// <summary>Directory holding silero_vad_16k.safetensors; blank means go looking.</summary>
     public string VadAssetPath { get => _vadAssetPath; set => Set(ref _vadAssetPath, value); }
-    public string Task { get => _task; set => Set(ref _task, value); }
+    public string Task
+    {
+        get => _task;
+        set
+        {
+            if (!Set(ref _task, value)) return;
+            Notify(nameof(SelectedChip));
+            Notify(nameof(TaskTitle));
+            Notify(nameof(TaskBlurb));
+            Notify(nameof(TaskBadge));
+            FilterCatalog();
+        }
+    }
+
+    /// <summary>
+    /// Narrow the picker to the current task, keeping the selection if it still
+    /// applies. Families declare their own task names, which are the same tokens
+    /// the session takes.
+    /// </summary>
+    private void FilterCatalog()
+    {
+        if (AllEntries.Count == 0) return;
+
+        var keep = _selectedEntry;
+        CatalogEntries.Clear();
+        foreach (var entry in AllEntries.Where(e => e.SupportsTask(_task)))
+        {
+            CatalogEntries.Add(entry);
+        }
+
+        SelectedEntry = keep is not null && CatalogEntries.Contains(keep) ? keep : null;
+        Notify(nameof(CatalogCount));
+    }
+
+    public string CatalogCount =>
+        $"{CatalogEntries.Count} package(s) for {_task}, {AllEntries.Count} in all.";
+
+    private static string TitleFor(string task) => task switch
+    {
+        "asr" => "ASR / Transcription",
+        "tts" => "Text to speech",
+        "vad" => "Voice activity",
+        "diar" => "Diarisation",
+        "sep" => "Source separation",
+        "align" => "Forced alignment",
+        _ => task,
+    };
+
+    /// <summary>
+    /// The structured result as JSON, which the web UI shows beside the plain
+    /// transcript. Hand-built rather than serialised: the rows are already flat
+    /// strings, and a serialiser would pull in a dependency for one string.
+    /// </summary>
+    private string BuildResultJson(List<ResultRow> rows, string transcript)
+    {
+        var text = new StringBuilder();
+        text.Append("{\n  \"text\": ").Append(Quote(transcript)).Append(",\n");
+        text.Append("  \"seconds\": ").Append(_lastRunSeconds.ToString("F3",
+            System.Globalization.CultureInfo.InvariantCulture)).Append(",\n");
+        text.Append("  \"rows\": [\n");
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            text.Append("    {\"kind\": ").Append(Quote(row.Kind))
+                .Append(", \"span\": ").Append(Quote(row.Span))
+                .Append(", \"value\": ").Append(Quote(row.Value))
+                .Append(", \"detail\": ").Append(Quote(row.Detail)).Append('}');
+            if (i < rows.Count - 1) text.Append(',');
+            text.Append('\n');
+        }
+        text.Append("  ]\n}");
+        return text.ToString();
+
+        static string Quote(string value)
+        {
+            var escaped = value.Replace("\\", "\\\\").Replace("\"", "\\\"")
+                               .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+            return $"\"{escaped}\"";
+        }
+    }
+
+    /// <summary>Headline for the current task, as the web UI's hero block shows it.</summary>
+    public string TaskTitle => _task switch
+    {
+        "asr" => "Transcription",
+        "tts" => "Text to speech",
+        "vad" => "Voice activity",
+        "diar" => "Diarisation",
+        "sep" => "Source separation",
+        "align" => "Forced alignment",
+        _ => _task,
+    };
+
+    public string TaskBlurb => _task switch
+    {
+        "asr" => "Transcribe spoken audio into text, with language and timestamp controls when supported.",
+        "tts" => "Generate speech from text, with voice presets and cloning when supported.",
+        "vad" => "Find the stretches of a recording that contain speech.",
+        "diar" => "Attribute speech to speakers across a recording.",
+        "sep" => "Split a mixture into its constituent sources.",
+        "align" => "Align a known transcript to the audio it was spoken in.",
+        _ => "",
+    };
+
+    public string TaskBadge => _task.ToUpperInvariant();
+
+    /// <summary>Backend in the top-right pill, which reads CUDA once a session is live.</summary>
+    public string BackendBadge => _backend.ToUpperInvariant();
+
+    public string LoadedModelName => _model?.Family ?? "No model loaded";
+
+    /// <summary>RESIDENT once weights are in memory, matching the web UI's wording.</summary>
+    public string LoadedModelState => _model is null ? "NONE" : _session is null ? "AVAILABLE" : "RESIDENT";
+
+    /// <summary>Run status shown after the buttons: Ready, Running…, or a completion time.</summary>
+    public string RunState => _busy ? "Running…"
+        : _lastRunSeconds > 0 ? $"Complete in {_lastRunSeconds:F2}s."
+        : "Ready";
+
+    /// <summary>The structured result, which the web UI shows beside the transcript.</summary>
+    public string ResultJson { get => _resultJson; private set => Set(ref _resultJson, value); }
     public string AudioPath { get => _audioPath; set => Set(ref _audioPath, value); }
 
     /// <summary>
@@ -139,6 +378,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set
         {
             if (!Set(ref _busy, value)) return;
+            Notify(nameof(RunState));
+            CancelCommand.RaiseCanExecuteChanged();
+            InstallCommand.RaiseCanExecuteChanged();
+            DeleteCommand.RaiseCanExecuteChanged();
             LoadCommand.RaiseCanExecuteChanged();
             RunCommand.RaiseCanExecuteChanged();
             SaveWavCommand.RaiseCanExecuteChanged();
@@ -239,7 +482,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 }
             }
 
+            for (var i = 0; i < TaskChips.Count; i++)
+            {
+                var chip = TaskChips[i];
+                TaskChips[i] = chip with { Count = supported.Contains(chip.Task) ? 1 : 0 };
+            }
+
             if (supported.Count > 0 && !supported.Contains(Task)) Task = supported[0];
+            Notify(nameof(SelectedChip));
+            Notify(nameof(LoadedModelName));
+            Notify(nameof(LoadedModelState));
+            ChunkBudget = TextChunker.DefaultBudget(model.Family);
             IsLoaded = true;
             Status = $"Loaded {model.Family} — {Options.Count} declared option(s), read from the model."
                    + (_vadModel is not null ? $"  VAD: {_vadModel.Family}." : "");
@@ -265,6 +518,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Rows.Clear();
         Transcript = "";
         _outputSamples = null;
+        _cancel = new CancellationTokenSource();
+        CancelCommand.RaiseCanExecuteChanged();
         try
         {
             var started = DateTime.UtcNow;
@@ -325,6 +580,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 }
                 if (Task == "tts")
                 {
+                    // Long text goes piece by piece against one session; handing a
+                    // family more than it can take in a request either truncates or
+                    // throws, depending on the family.
+                    var pieces = SplitLongText
+                        ? TextChunker.Split(Text, Math.Max(1, ChunkBudget))
+                        : [Text];
+
+                    if (pieces.Count > 1)
+                    {
+                        transcript = RunLongText(pieces, rows);
+                        return;
+                    }
+
                     request.SetText(Text, "en-us");
                     if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
                 }
@@ -383,6 +651,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             });
 
             _lastRunSeconds = (DateTime.UtcNow - started).TotalSeconds;
+            Notify(nameof(RunState));
+            ResultJson = BuildResultJson(rows, transcript);
             Transcript = transcript;
             foreach (var row in rows) Rows.Add(row);
             Notify(nameof(OutputSamples));
@@ -403,6 +673,60 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Busy = false;
             SaveWavCommand.RaiseCanExecuteChanged();
         }
+    }
+
+    /// <summary>
+    /// Synthesise each piece of a long text against the one session and join the
+    /// results. Segments are kept individually as well as joined -- a caption or
+    /// dubbing workflow wants the pieces, not only the merged clip.
+    /// </summary>
+    private string RunLongText(List<string> pieces, List<ResultRow> rows)
+    {
+        _segments.Clear();
+        var cancelled = false;
+
+        for (var index = 0; index < pieces.Count; index++)
+        {
+            if (_cancel?.IsCancellationRequested == true) { cancelled = true; break; }
+
+            var piece = pieces[index];
+            using var request = new AudioCppRequest();
+            foreach (var option in Options.Where(o =>
+                         o.Scope == nameof(AudioCppOptionScope.Request) && o.Value.Length > 0))
+            {
+                request.SetOption(option.Name, option.Value);
+            }
+            request.SetText(piece, "en-us");
+            if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
+
+            using var result = _session!.Run(request);
+            if (result.Audio is not { } audio) continue;
+
+            var segment = new AudioSegment(
+                index + 1, piece, audio.Samples, audio.SampleRate, audio.Channels);
+            _segments.Add(segment);
+            rows.Add(new ResultRow(
+                "segment",
+                $"{segment.Seconds:F2}s",
+                piece.Length > 80 ? piece[..80] + "…" : piece,
+                $"{segment.Samples.Length} samples"));
+        }
+
+        if (_segments.Count == 0)
+        {
+            _segmentedSummary = "Synthesis produced no audio.";
+            return "";
+        }
+
+        var (samples, rate, channels) = AudioJoin.Concatenate(_segments);
+        _outputSamples = samples;
+        _outputSampleRate = rate;
+        _outputChannels = channels;
+
+        var seconds = _segments.Sum(seg => seg.Seconds);
+        _segmentedSummary = $"{_segments.Count} of {pieces.Count} piece(s), {seconds:F1}s"
+                          + (cancelled ? ".  Cancelled part-way." : ".");
+        return string.Join(" ", _segments.Select(seg => seg.Text));
     }
 
     /// <summary>
@@ -445,8 +769,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         var pieces = new List<string>();
+        var cancelled = false;
         foreach (var (start, end) in groups)
         {
+            if (_cancel?.IsCancellationRequested == true) { cancelled = true; break; }
+
             var window = new float[end - start];
             Array.Copy(clip.Samples, (int)start, window, 0, window.Length);
 
@@ -472,7 +799,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         var speech = groups.Sum(g => (g.End - g.Start)) / (double)rate;
         _segmentedSummary = $"{groups.Count} group(s) from {segments.Count} VAD segment(s), "
-                          + $"{speech:F1}s of speech.";
+                          + $"{speech:F1}s of speech."
+                          + (cancelled ? "  Cancelled part-way." : "");
         return string.Join(" ", pieces);
     }
 
@@ -503,6 +831,179 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
         Add(gs, ge);
         return groups;
+    }
+
+    /// <summary>
+    /// Default models root. Follows the platform's application-data convention
+    /// rather than writing beside the executable, which is often read-only when
+    /// an app is installed properly.
+    /// </summary>
+    private static string DefaultModelsRoot()
+    {
+        var configured = Environment.GetEnvironmentVariable("AUDIOCPP_MODELS_ROOT");
+        if (configured is { Length: > 0 }) return configured;
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "audiocpp", "models");
+    }
+
+    /// <summary>
+    /// Find audio.cpp's model_specs. Same resolution problem as the native
+    /// library: an explicit setting, else a checkout beside this one.
+    /// </summary>
+    private static string? FindModelSpecs()
+    {
+        var configured = Environment.GetEnvironmentVariable("AUDIOCPP_MODEL_SPECS");
+        if (configured is { Length: > 0 } && Directory.Exists(configured)) return configured;
+
+        var roots = new List<string>();
+        var native = Environment.GetEnvironmentVariable("AUDIOCPP_NATIVE_DIR");
+        for (var dir = native is { Length: > 0 } ? new DirectoryInfo(native) : null;
+             dir is not null; dir = dir.Parent)
+        {
+            roots.Add(Path.Combine(dir.FullName, "model_specs"));
+        }
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            roots.Add(Path.Combine(dir.FullName, "audio.cpp", "model_specs"));
+            if (dir.Parent is not null)
+                roots.Add(Path.Combine(dir.Parent.FullName, "audio.cpp", "model_specs"));
+        }
+        return roots.FirstOrDefault(Directory.Exists);
+    }
+
+    private void LoadCatalog()
+    {
+        var specs = FindModelSpecs();
+        if (specs is null)
+        {
+            InstallStatus = "No model_specs found; the package list is unavailable. "
+                          + "Set AUDIOCPP_MODEL_SPECS to enable it.";
+            return;
+        }
+
+        var catalog = Catalog.Load(specs);
+        foreach (var family in catalog.Families.OrderBy(f => f.DisplayName, StringComparer.Ordinal))
+        {
+            foreach (var package in family.Packages)
+            {
+                AllEntries.Add(new CatalogEntry(family, package));
+            }
+        }
+
+        RefreshCatalogState();
+        FilterCatalog();
+        InstallStatus = catalog.Unreadable.Count == 0
+            ? $"{AllEntries.Count} packages across {catalog.Families.Count} families."
+            : $"{AllEntries.Count} packages; {catalog.Unreadable.Count} spec(s) unreadable.";
+    }
+
+    /// <summary>
+    /// Re-read what is on disk. Local only -- no network -- so it stays instant
+    /// and works offline; download sizes are probed on demand instead.
+    /// </summary>
+    private void RefreshCatalogState()
+    {
+        foreach (var entry in AllEntries)
+        {
+            entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
+            if (entry.IsInstalled)
+            {
+                entry.Bytes = PackageInstaller.BytesOnDisk(ModelsRoot, entry.Package);
+            }
+        }
+        Notify(nameof(SelectedSummary));
+    }
+
+    private async Task InstallAsync()
+    {
+        if (_selectedEntry is not { } entry) return;
+
+        Busy = true;
+        InstallFraction = 0;
+        _cancel = new CancellationTokenSource();
+        CancelCommand.RaiseCanExecuteChanged();
+        try
+        {
+            var probe = await _installer.ProbeAsync(entry.Package, _cancel.Token);
+            if (!probe.Available)
+            {
+                // The spec declares packages the repository does not serve. Say so
+                // plainly rather than failing part-way through a download.
+                entry.Note = $"Unavailable: {probe.Problem}";
+                InstallStatus = entry.Note;
+                Notify(nameof(SelectedSummary));
+                return;
+            }
+
+            entry.Bytes = probe.Bytes;
+            var progress = new Progress<InstallProgress>(p =>
+            {
+                InstallFraction = p.Fraction;
+                InstallStatus = $"{p.File}  ({p.FileIndex}/{p.FileCount})  "
+                              + $"{p.BytesDone / 1024.0 / 1024.0:F0} of "
+                              + $"{p.BytesTotal / 1024.0 / 1024.0:F0} MB";
+            });
+
+            await _installer.InstallAsync(ModelsRoot, entry.Package, progress, _cancel.Token);
+
+            entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
+            entry.Bytes = PackageInstaller.BytesOnDisk(ModelsRoot, entry.Package);
+            ModelPath = entry.ResolvePath(ModelsRoot);
+            InstallStatus = $"Installed {entry.Title}.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Leave the partials: CleanPartials is the user's call, and a resumed
+            // install would otherwise start from zero.
+            entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
+            InstallStatus = "Install cancelled.";
+        }
+        catch (Exception exception) when (exception is HttpRequestException
+                                          or InvalidOperationException or IOException)
+        {
+            entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
+            InstallStatus = $"Install failed: {exception.Message}";
+        }
+        finally
+        {
+            _cancel?.Dispose();
+            _cancel = null;
+            InstallFraction = 0;
+            Busy = false;
+            InstallCommand.RaiseCanExecuteChanged();
+            DeleteCommand.RaiseCanExecuteChanged();
+            Notify(nameof(SelectedSummary));
+        }
+    }
+
+    private Task DeleteAsync()
+    {
+        if (_selectedEntry is not { } entry) return System.Threading.Tasks.Task.CompletedTask;
+
+        try
+        {
+            PackageInstaller.Delete(ModelsRoot, entry.Package);
+            entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
+            entry.Bytes = 0;
+            InstallStatus = $"Deleted {entry.Title}.";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            InstallStatus = $"Delete failed: {exception.Message}";
+        }
+        InstallCommand.RaiseCanExecuteChanged();
+        DeleteCommand.RaiseCanExecuteChanged();
+        Notify(nameof(SelectedSummary));
+        return System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    private Task CancelAsync()
+    {
+        _cancel?.Cancel();
+        Status = "Cancelling after the current segment…";
+        return System.Threading.Tasks.Task.CompletedTask;
     }
 
     private async Task SaveWavAsync()
@@ -642,11 +1143,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         var relative = Path.Combine("assets", "framework", "models", "silero_vad");
         var roots = new List<string> { Directory.GetCurrentDirectory() };
+
         var native = Environment.GetEnvironmentVariable("AUDIOCPP_NATIVE_DIR");
         for (var dir = native is { Length: > 0 } ? new DirectoryInfo(native) : null;
              dir is not null; dir = dir.Parent)
         {
             roots.Add(dir.FullName);
+        }
+
+        // Also look for a sibling audio.cpp checkout, as the native library
+        // lookup does. Without this the app starts fine without any environment
+        // set but quietly falls back to fixed chunking, which is worse: the
+        // difference is a silent 111 words on a 10-minute clip, not an error.
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            roots.Add(Path.Combine(dir.FullName, "audio.cpp"));
         }
 
         return roots.Select(root => Check(Path.Combine(root, relative)))
@@ -721,3 +1232,7 @@ public sealed class DeclaredOption(
 }
 
 public readonly record struct ResultRow(string Kind, string Span, string Value, string Detail);
+
+/// <summary>One entry in the task selector: a display title and how many of the
+/// loaded model's tasks it covers.</summary>
+public sealed record TaskChip(string Task, string Title, int Count);

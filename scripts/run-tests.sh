@@ -87,6 +87,23 @@ cd "$SOURCE_ROOT"
 run() { dotnet run --project "$BINDINGS_ROOT/$1" --no-build -- "${@:2}"; }
 
 echo "threads=$THREADS"
+
+# Cheapest check first, and the only one needing no models: if an entry point
+# went unbound, every later failure would be a confusing symptom of it.
+echo "== binding coverage =="
+run tests/AudioCpp.BindingCoverage/AudioCpp.BindingCoverage.csproj
+coverage_status=$?
+[ $coverage_status -ne 0 ] && [ $coverage_status -ne 77 ] && exit 1
+
+echo
+# Also model-free: parses the specs and checks the install layout. Network
+# checks are opt-in, so this stays fast and offline by default.
+echo "== package catalog =="
+run tests/AudioCpp.PackageTest/AudioCpp.PackageTest.csproj
+package_status=$?
+[ $package_status -ne 0 ] && [ $package_status -ne 77 ] && exit 1
+
+echo
 echo "== C# path test =="
 run tests/AudioCpp.PathTest/AudioCpp.PathTest.csproj \
     "$VAD_MODEL" "$SAMPLE_WAV" cpu

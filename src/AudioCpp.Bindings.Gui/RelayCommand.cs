@@ -1,6 +1,6 @@
 using System.Windows.Input;
 
-namespace AudioCpp.Demo;
+namespace AudioCpp.Bindings.Gui;
 
 /// <summary>A command with no package dependency, since this sample deliberately has none.</summary>
 public sealed class RelayCommand(Func<Task> execute, Func<bool>? canExecute = null) : ICommand

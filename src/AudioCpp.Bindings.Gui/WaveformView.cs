@@ -2,7 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 
-namespace AudioCpp.Demo;
+namespace AudioCpp.Bindings.Gui;
 
 /// <summary>A min/max envelope of generated audio. Enough to see that a run produced sound.</summary>
 public sealed class WaveformView : Control

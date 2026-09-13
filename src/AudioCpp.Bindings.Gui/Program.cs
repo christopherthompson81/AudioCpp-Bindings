@@ -1,6 +1,6 @@
 using Avalonia;
 
-namespace AudioCpp.Demo;
+namespace AudioCpp.Bindings.Gui;
 
 internal static class Program
 {

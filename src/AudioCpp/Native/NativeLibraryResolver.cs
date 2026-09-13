@@ -26,12 +26,11 @@ internal static class NativeLibraryResolver
     {
         if (libraryName != NativeMethods.Library) return IntPtr.Zero;
 
-        var configured = Environment.GetEnvironmentVariable("AUDIOCPP_NATIVE_DIR");
-        if (!string.IsNullOrEmpty(configured))
+        foreach (var directory in SearchDirectories())
         {
             foreach (var candidate in FileNames())
             {
-                var path = Path.Combine(configured, candidate);
+                var path = Path.Combine(directory, candidate);
                 if (File.Exists(path) && NativeLibrary.TryLoad(path, out var loaded)) return loaded;
             }
         }
@@ -39,6 +38,37 @@ internal static class NativeLibraryResolver
         // Fall back to the platform's own search, so a properly installed or
         // co-located library still works with no configuration.
         return NativeLibrary.TryLoad(libraryName, assembly, searchPath, out var found) ? found : IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Where to look, in order: an explicit setting, then the usual places an
+    /// audio.cpp build sits relative to a checkout of this repository.
+    /// </summary>
+    /// <remarks>
+    /// Requiring AUDIOCPP_NATIVE_DIR for every run is a papercut: the library is
+    /// almost always in a build directory of a sibling audio.cpp checkout, and
+    /// looking there costs a few File.Exists calls on first interop use. The
+    /// environment variable still wins, so an explicit choice is never
+    /// second-guessed.
+    /// </remarks>
+    private static IEnumerable<string> SearchDirectories()
+    {
+        var configured = Environment.GetEnvironmentVariable("AUDIOCPP_NATIVE_DIR");
+        if (!string.IsNullOrEmpty(configured)) yield return configured;
+
+        // Common CMake build directory names, in the order a developer is
+        // likeliest to have built most recently.
+        string[] builds = ["build", "build-cuda", "build-release", "cmake-build-release"];
+
+        // Walking up already visits every ancestor, so checking dir and dir.Parent
+        // on each step would probe each one twice.
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            foreach (var build in builds)
+            {
+                yield return Path.Combine(dir.FullName, "audio.cpp", build, "bin");
+            }
+        }
     }
 
     private static IEnumerable<string> FileNames()
