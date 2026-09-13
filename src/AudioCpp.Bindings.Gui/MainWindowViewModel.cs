@@ -916,7 +916,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         get => _task;
         set
         {
+            if (_task == value) return;
+
+            // The outgoing task's output goes with it, and the incoming task's
+            // comes back. Leaving it in place read as the new task's output --
+            // a transcript still in the panel after switching to synthesis
+            // looks like something the synthesis produced.
+            var leaving = _task;
             if (!Set(ref _task, value)) return;
+            StashResult(leaving);
+            RestoreResult(value);
             Notify(nameof(StudioTitle));
             Notify(nameof(TaskBadge));
             Notify(nameof(ShowText));
@@ -926,6 +935,59 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(ShowAsrAudioControls));
             RecordCommand.RaiseCanExecuteChanged();
         }
+    }
+
+    private readonly Dictionary<string, TaskResult> _resultsByTask = [];
+
+    private void StashResult(string task)
+    {
+        var result = new TaskResult(
+            Transcript, ResultJson, TimingBreakdown, _segmentedSummary, _lastRunSeconds,
+            [.. Rows], [.. _words], [.. OutputStreams], [.. Artifacts], [.. _segments],
+            _outputSamples, _outputSampleRate, _outputChannels);
+
+        if (result.HasAnything) _resultsByTask[task] = result;
+        else _resultsByTask.Remove(task);
+    }
+
+    private void RestoreResult(string task)
+    {
+        var result = _resultsByTask.GetValueOrDefault(task, TaskResult.Empty);
+
+        // The player holds a device open on the outgoing task's audio, so it
+        // has to go before the samples it is playing are replaced.
+        ResetPlayer();
+
+        Transcript = result.Transcript;
+        ResultJson = result.ResultJson;
+        TimingBreakdown = result.TimingBreakdown;
+        _segmentedSummary = result.SegmentedSummary;
+        _lastRunSeconds = result.LastRunSeconds;
+        _outputSamples = result.OutputSamples;
+        _outputSampleRate = result.OutputSampleRate;
+        _outputChannels = result.OutputChannels;
+
+        Rows.Clear();
+        foreach (var row in result.Rows) Rows.Add(row);
+        _words.Clear();
+        _words.AddRange(result.Words);
+        OutputStreams.Clear();
+        foreach (var stream in result.Streams) OutputStreams.Add(stream);
+        Artifacts.Clear();
+        foreach (var artifact in result.Artifacts) Artifacts.Add(artifact);
+        _segments.Clear();
+        _segments.AddRange(result.Segments);
+
+        Notify(nameof(OutputSamples));
+        Notify(nameof(OutputSummary));
+        Notify(nameof(Timing));
+        Notify(nameof(RunState));
+        Notify(nameof(HasWordTimings));
+        Notify(nameof(HasPreviewAudio));
+        SaveWavCommand.RaiseCanExecuteChanged();
+        SaveSrtCommand.RaiseCanExecuteChanged();
+        SaveVttCommand.RaiseCanExecuteChanged();
+        PlayCommand.RaiseCanExecuteChanged();
     }
 
     /// <summary>The tasks the current workflow covers, named for the selector.</summary>
@@ -998,6 +1060,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             : _selectedPackages.TryGetValue(_workflow, out var remembered)
                 ? CatalogEntries.FirstOrDefault(e => e.Key == remembered)
                 : null;
+        // A family hint belongs to the package it came from. Carried into a
+        // workflow with nothing selected it is a hint for a family this tab
+        // cannot run, and a hand-picked model then fails to load with
+        // "GGUF embeds model spec for family 'x', not 'y'" -- which reads as a
+        // problem with the file rather than with a stale field two tabs away.
+        if (!_applyingSettings && _selectedEntry is null && FamilyHint.Length > 0
+            && !tasks.Any(task => AllEntries
+                    .Where(e => e.Family.Family == FamilyHint)
+                    .Any(e => e.SupportsTask(task))))
+        {
+            FamilyHint = "";
+        }
+
         RefreshWorkflowCounts();
         Notify(nameof(CatalogCount));
     }
