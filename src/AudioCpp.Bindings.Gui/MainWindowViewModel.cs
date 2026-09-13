@@ -757,6 +757,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                         return;
                     }
                     request.SetAudio(input.Samples, input.SampleRate, input.Channels);
+
+                    // Forced alignment needs both: the audio and the transcript to
+                    // align against it. Showing a text box whose value was never
+                    // sent is the same defect as showing a control a task ignores.
+                    if (Task == "align" && Text.Length > 0) request.SetText(Text, "en-us");
                 }
 
                 using var result = _session!.Run(request);
