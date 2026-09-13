@@ -78,6 +78,96 @@ internal static class LiveCheck
         return failures;
     }
 
+    /// <summary>
+    /// Load, run, unload, and load again — checking the GPU actually gives the
+    /// memory back rather than the flag merely flipping.
+    /// </summary>
+    private static async Task<int> LifecycleCheckAsync(MainWindowViewModel viewModel)
+    {
+        var failures = 0;
+
+        Console.WriteLine($"before load:  {GpuUsedMb()} MB used");
+        await viewModel.LoadCommand.ExecuteAsync();
+        if (!viewModel.IsLoaded) { Console.Error.WriteLine("load failed"); return 1; }
+
+        await viewModel.RunCommand.ExecuteAsync();
+        var afterRun = GpuUsedMb();
+        Console.WriteLine($"after run:    {afterRun} MB used  ({viewModel.LoadedModelState}, "
+                          + $"{viewModel.LoadedModelWeights})");
+
+        await viewModel.UnloadCommand.ExecuteAsync();
+        await Task.Delay(1500);   // the driver frees asynchronously
+        var afterUnload = GpuUsedMb();
+        Console.WriteLine($"after unload: {afterUnload} MB used  ({viewModel.LoadedModelState})");
+
+        if (viewModel.IsLoaded) { Console.Error.WriteLine("still loaded after unload"); failures++; }
+        if (viewModel.Options.Count > 0) { Console.Error.WriteLine("options survived unload"); failures++; }
+
+        // The point of an unload is the memory. Anything less than most of it
+        // coming back means sessions or the registry are still holding on.
+        if (afterRun > 0 && afterUnload > 0 && afterUnload > afterRun * 0.7)
+        {
+            Console.Error.WriteLine($"  unload freed little: {afterRun} -> {afterUnload} MB");
+            failures++;
+        }
+
+        await viewModel.LoadCommand.ExecuteAsync();
+        Console.WriteLine($"reloaded:     {viewModel.IsLoaded} ({viewModel.LoadedModelName})");
+        if (!viewModel.IsLoaded) { Console.Error.WriteLine("could not load again after unload"); failures++; }
+
+        // Switching models must free the old one rather than stacking them. The
+        // comparison has to be run-to-run, not load-to-load: loading is lazy and
+        // weights only reach the GPU when a session runs, so comparing two
+        // freshly-loaded models compares two baselines and proves nothing.
+        var second = Environment.GetEnvironmentVariable("LIFECYCLE_SECOND_MODEL");
+        if (second is { Length: > 0 } && File.Exists(second))
+        {
+            await viewModel.RunCommand.ExecuteAsync();
+            var parakeetResident = GpuUsedMb();
+
+            viewModel.ModelPath = second;
+            viewModel.FamilyHint = "";
+            await viewModel.LoadCommand.ExecuteAsync();
+            viewModel.Task = "tts";
+            await viewModel.RunCommand.ExecuteAsync();
+            await Task.Delay(1500);
+            var afterSwitch = GpuUsedMb();
+
+            Console.WriteLine($"switched to:  {viewModel.LoadedModelName} and ran, {afterSwitch} MB "
+                              + $"(the previous model resident was {parakeetResident} MB)");
+
+            // The second model is an order of magnitude smaller, so if the first
+            // were still resident the total could not fall.
+            if (afterSwitch >= parakeetResident)
+            {
+                Console.Error.WriteLine($"  switching did not free the previous model: "
+                                        + $"{parakeetResident} -> {afterSwitch} MB");
+                failures++;
+            }
+        }
+
+        return failures;
+    }
+
+    /// <summary>GPU memory in use, or 0 where nvidia-smi is not available.</summary>
+    private static int GpuUsedMb()
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "nvidia-smi",
+                Arguments = "--query-gpu=memory.used --format=csv,noheader,nounits",
+                RedirectStandardOutput = true,
+            });
+            if (process is null) return 0;
+            var output = process.StandardOutput.ReadToEnd().Trim();
+            process.WaitForExit(3000);
+            return int.TryParse(output.Split('\n')[0].Trim(), out var mb) ? mb : 0;
+        }
+        catch (Exception) { return 0; }
+    }
+
     internal static void Arm(MainWindowViewModel viewModel, string[] args, int seconds)
     {
         _ = Dispatcher.UIThread.InvokeAsync(async () =>
@@ -149,6 +239,14 @@ internal static class LiveCheck
                                       + $"audio={viewModel.ShowAudioInput} asrExtras={viewModel.ShowAsrAudioControls} "
                                       + $"split={viewModel.ShowTextChunking}");
                     await Task.Delay(60000);   // held for a screenshot; killed externally
+                    return;
+                }
+
+                if (args.Contains("--lifecycle-check"))
+                {
+                    failures += await LifecycleCheckAsync(viewModel);
+                    Console.WriteLine(failures == 0 ? "lifecycle OK" : $"lifecycle: {failures} failure(s)");
+                    Environment.Exit(failures == 0 ? 0 : 1);
                     return;
                 }
 

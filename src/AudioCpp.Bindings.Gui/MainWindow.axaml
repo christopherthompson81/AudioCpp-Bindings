@@ -95,6 +95,10 @@
               <TextBlock Text="{Binding LoadedModelName}" Classes="Title" FontSize="15" />
               <TextBlock Text="{Binding LoadedModelState}" Classes="Eyebrow"
                          Foreground="{DynamicResource AppAccent}" />
+              <!-- On disk, not in memory: the ABI reports no runtime footprint. -->
+              <TextBlock Text="{Binding LoadedModelWeights}" Classes="Subtle" FontSize="11" />
+              <Button Content="Unload" Command="{Binding UnloadCommand}"
+                      HorizontalAlignment="Left" Margin="0,6,0,0" />
             </StackPanel>
           </Border>
         </Grid>
