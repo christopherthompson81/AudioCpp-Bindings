@@ -16,7 +16,7 @@ public static class AudioCapture
     {
         get
         {
-            var packed = NativeMethods.audiocapture_version();
+            var packed = NativeMethods.audioio_version();
             return new Version((int)(packed >> 16), (int)((packed >> 8) & 0xFF), (int)(packed & 0xFF));
         }
     }
@@ -27,7 +27,7 @@ public static class AudioCapture
     /// and ALSA answered is the first thing anyone needs to know.
     /// </summary>
     public static string Backend =>
-        Marshal.PtrToStringUTF8(NativeMethods.audiocapture_backend()) ?? "unknown";
+        Marshal.PtrToStringUTF8(NativeMethods.audioio_backend()) ?? "unknown";
 
     /// <summary>
     /// Re-enumerate and return the capture devices. Indices are only valid
@@ -35,14 +35,14 @@ public static class AudioCapture
     /// </summary>
     public static IReadOnlyList<CaptureDeviceInfo> Devices()
     {
-        var count = NativeMethods.audiocapture_refresh_devices();
+        var count = NativeMethods.audioio_refresh_devices();
         var devices = new List<CaptureDeviceInfo>(Math.Max(0, count));
         for (var i = 0; i < count; i++)
         {
             devices.Add(new CaptureDeviceInfo(
                 i,
-                Marshal.PtrToStringUTF8(NativeMethods.audiocapture_device_name(i)) ?? $"device {i}",
-                NativeMethods.audiocapture_device_is_default(i) != 0));
+                Marshal.PtrToStringUTF8(NativeMethods.audioio_device_name(i)) ?? $"device {i}",
+                NativeMethods.audioio_device_is_default(i) != 0));
         }
         return devices;
     }
@@ -86,7 +86,7 @@ public sealed unsafe class CaptureSession : IDisposable
     internal static CaptureSession Open(int index, int sampleRate, int channels)
     {
         var error = stackalloc byte[256];
-        var handle = NativeMethods.audiocapture_open(index, sampleRate, channels, error, 256);
+        var handle = NativeMethods.audioio_open(index, sampleRate, channels, error, 256);
         if (handle == IntPtr.Zero)
         {
             var message = Marshal.PtrToStringUTF8((IntPtr)error);
@@ -101,7 +101,7 @@ public sealed unsafe class CaptureSession : IDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
-            if (NativeMethods.audiocapture_start(_handle) == 0)
+            if (NativeMethods.audioio_start(_handle) == 0)
                 throw new InvalidOperationException("could not start the capture device");
             IsRunning = true;
         }
@@ -112,7 +112,7 @@ public sealed unsafe class CaptureSession : IDisposable
         lock (_gate)
         {
             if (_handle == IntPtr.Zero) return;
-            NativeMethods.audiocapture_stop(_handle);
+            NativeMethods.audioio_stop(_handle);
             IsRunning = false;
         }
     }
@@ -136,7 +136,7 @@ public sealed unsafe class CaptureSession : IDisposable
             var frames = buffer.Length / Channels;
             fixed (float* pointer = buffer)
             {
-                return (int)NativeMethods.audiocapture_read(_handle, pointer, (nuint)frames);
+                return (int)NativeMethods.audioio_read(_handle, pointer, (nuint)frames);
             }
         }
     }
@@ -150,7 +150,7 @@ public sealed unsafe class CaptureSession : IDisposable
     {
         lock (_gate)
         {
-            return _handle == IntPtr.Zero ? 0 : NativeMethods.audiocapture_overruns(_handle);
+            return _handle == IntPtr.Zero ? 0 : NativeMethods.audioio_overruns(_handle);
         }
     }
 
@@ -159,7 +159,7 @@ public sealed unsafe class CaptureSession : IDisposable
     {
         lock (_gate)
         {
-            return _handle == IntPtr.Zero ? 0f : NativeMethods.audiocapture_peak(_handle);
+            return _handle == IntPtr.Zero ? 0f : NativeMethods.audioio_peak(_handle);
         }
     }
 
@@ -184,7 +184,7 @@ public sealed unsafe class CaptureSession : IDisposable
             var handle = _handle;
             _handle = IntPtr.Zero;
             IsRunning = false;
-            NativeMethods.audiocapture_close(handle);
+            NativeMethods.audioio_close(handle);
         }
     }
 }

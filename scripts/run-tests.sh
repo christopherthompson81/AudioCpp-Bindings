@@ -106,7 +106,7 @@ package_status=$?
 echo
 # Needs an audio backend rather than a model, and skips without one.
 echo "== audio capture =="
-run tests/AudioCpp.CaptureTest/AudioCpp.CaptureTest.csproj
+run tests/AudioCpp.AudioTest/AudioCpp.AudioTest.csproj
 capture_status=$?
 [ $capture_status -ne 0 ] && [ $capture_status -ne 77 ] && exit 1
 
