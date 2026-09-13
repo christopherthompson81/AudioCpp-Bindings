@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using AudioCpp.Audio;
 using Avalonia.Media;
 
 namespace AudioCpp.Bindings.Gui;
@@ -25,12 +26,17 @@ public sealed class Arena : INotifyPropertyChanged
     private string _status = "Configure both sides, then Compare.";
     private string _summary = "";
     private bool _busy;
+    private AudioPlayer? _player;
 
     public Arena()
     {
         LoadLeftCommand = new RelayCommand(() => LoadAsync(Left), () => !_busy);
         LoadRightCommand = new RelayCommand(() => LoadAsync(Right), () => !_busy);
         CompareCommand = new RelayCommand(CompareAsync, () => !_busy && Left.IsLoaded && Right.IsLoaded);
+        UnloadLeftCommand = new RelayCommand(() => UnloadAsync(Left), () => Left.IsLoaded && !_busy);
+        UnloadRightCommand = new RelayCommand(() => UnloadAsync(Right), () => Right.IsLoaded && !_busy);
+        PlayLeftCommand = new RelayCommand(() => PlayAsync(Left), () => Left.Audio is { Length: > 0 });
+        PlayRightCommand = new RelayCommand(() => PlayAsync(Right), () => Right.Audio is { Length: > 0 });
     }
 
     public ArenaSlot Left { get; } = new("A");
@@ -52,9 +58,7 @@ public sealed class Arena : INotifyPropertyChanged
         private set
         {
             if (!Set(ref _busy, value)) return;
-            LoadLeftCommand.RaiseCanExecuteChanged();
-            LoadRightCommand.RaiseCanExecuteChanged();
-            CompareCommand.RaiseCanExecuteChanged();
+            RefreshCommands();
         }
     }
 
@@ -64,6 +68,18 @@ public sealed class Arena : INotifyPropertyChanged
     public RelayCommand LoadLeftCommand { get; }
     public RelayCommand LoadRightCommand { get; }
     public RelayCommand CompareCommand { get; }
+
+    /// <summary>
+    /// Free a side. Two models here sit alongside whatever the Studio holds, so
+    /// three can be resident at once — enough to exhaust a card without an
+    /// explicit way to give one back.
+    /// </summary>
+    public RelayCommand UnloadLeftCommand { get; }
+    public RelayCommand UnloadRightCommand { get; }
+
+    /// <summary>Hear a side's synthesis: comparing two voices means listening to both.</summary>
+    public RelayCommand PlayLeftCommand { get; }
+    public RelayCommand PlayRightCommand { get; }
 
     private async Task LoadAsync(ArenaSlot slot)
     {
@@ -108,6 +124,7 @@ public sealed class Arena : INotifyPropertyChanged
             });
 
             BuildDiff();
+            RefreshCommands();
             Status = "Compared.";
         }
         catch (Exception exception) when (exception is AudioCppException
@@ -119,6 +136,54 @@ public sealed class Arena : INotifyPropertyChanged
         {
             Busy = false;
         }
+    }
+
+    private async Task UnloadAsync(ArenaSlot slot)
+    {
+        StopPlayer();
+        await System.Threading.Tasks.Task.Run(slot.Unload);
+        Status = $"{slot.Title}: unloaded";
+        RefreshCommands();
+    }
+
+    /// <summary>
+    /// One player at a time: comparing two clips means hearing them one after
+    /// the other, and two devices open would play them over each other.
+    /// </summary>
+    private Task PlayAsync(ArenaSlot slot)
+    {
+        StopPlayer();
+        if (slot.Audio is not { Length: > 0 } samples) return System.Threading.Tasks.Task.CompletedTask;
+
+        try
+        {
+            _player = AudioPlayer.Open(samples, slot.AudioRate, slot.AudioChannels);
+            _player.Play();
+            Status = $"Playing {slot.Title}.";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException
+                                          or DllNotFoundException or ArgumentException)
+        {
+            Status = exception.Message;
+        }
+        return System.Threading.Tasks.Task.CompletedTask;
+    }
+
+    private void StopPlayer()
+    {
+        _player?.Dispose();
+        _player = null;
+    }
+
+    private void RefreshCommands()
+    {
+        LoadLeftCommand.RaiseCanExecuteChanged();
+        LoadRightCommand.RaiseCanExecuteChanged();
+        CompareCommand.RaiseCanExecuteChanged();
+        UnloadLeftCommand.RaiseCanExecuteChanged();
+        UnloadRightCommand.RaiseCanExecuteChanged();
+        PlayLeftCommand.RaiseCanExecuteChanged();
+        PlayRightCommand.RaiseCanExecuteChanged();
     }
 
     private void BuildDiff()
@@ -153,6 +218,7 @@ public sealed class Arena : INotifyPropertyChanged
 
     public void Dispose()
     {
+        StopPlayer();
         Left.Unload();
         Right.Unload();
     }

@@ -273,6 +273,20 @@ internal static class LiveCheck
                     if (arena.Left.WordCount == 0 || arena.Right.WordCount == 0)
                     { Console.Error.WriteLine("a side produced nothing"); failures++; }
 
+                    // Two models here plus whatever the Studio holds is three on
+                    // one card; unloading a side has to actually give it back.
+                    var before = GpuUsedMb();
+                    await arena.UnloadLeftCommand.ExecuteAsync();
+                    await arena.UnloadRightCommand.ExecuteAsync();
+                    await Task.Delay(1500);
+                    var after = GpuUsedMb();
+                    Console.WriteLine($"unloaded both sides: {before} -> {after} MB");
+                    if (before > 0 && after >= before)
+                    {
+                        Console.Error.WriteLine("  unloading the sides freed nothing");
+                        failures++;
+                    }
+
                     Console.WriteLine(failures == 0 ? "arena OK" : $"arena: {failures} failure(s)");
                     Environment.Exit(failures == 0 ? 0 : 1);
                     return;

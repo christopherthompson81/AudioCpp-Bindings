@@ -84,6 +84,12 @@
               </Grid>
               <TextBlock Text="{Binding Status}" Classes="Subtle" FontSize="11" TextWrapping="Wrap" />
               <TextBlock Text="{Binding Timing}" Classes="Subtle" FontSize="11" />
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button Content="Unload"
+                        Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).UnloadLeftCommand}" />
+                <Button Content="Play"
+                        Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).PlayLeftCommand}" />
+              </StackPanel>
             </StackPanel>
           </Border>
 
@@ -100,6 +106,12 @@
               </Grid>
               <TextBlock Text="{Binding Status}" Classes="Subtle" FontSize="11" TextWrapping="Wrap" />
               <TextBlock Text="{Binding Timing}" Classes="Subtle" FontSize="11" />
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button Content="Unload"
+                        Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).UnloadRightCommand}" />
+                <Button Content="Play"
+                        Command="{Binding $parent[ScrollViewer].((vm:Arena)DataContext).PlayRightCommand}" />
+              </StackPanel>
             </StackPanel>
           </Border>
         </Grid>
