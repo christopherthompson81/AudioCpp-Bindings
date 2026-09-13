@@ -26,6 +26,15 @@ public partial class MainWindow : Window
         if (path is not null) viewModel.VoiceAudioPath = path;
     }
 
+    private async void OnSaveArtifact(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: ArtifactEntry artifact }
+            && DataContext is MainWindowViewModel viewModel)
+        {
+            await viewModel.SaveArtifactAsync(artifact);
+        }
+    }
+
     private async void OnPlayStream(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (sender is Button { Tag: NamedAudioEntry stream }

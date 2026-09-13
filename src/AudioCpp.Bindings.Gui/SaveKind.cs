@@ -23,6 +23,7 @@ public readonly record struct SaveKind(string Title, string Description, string 
             ["srt"] = ("Save subtitles", "SubRip subtitles"),
             ["vtt"] = ("Save subtitles", "WebVTT subtitles"),
             ["json"] = ("Save data", "JSON"),
+            ["mid"] = ("Save MIDI", "MIDI file"),
             ["txt"] = ("Save text", "Text"),
         };
 
