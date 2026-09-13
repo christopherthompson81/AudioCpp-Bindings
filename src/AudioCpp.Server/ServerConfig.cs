@@ -1,5 +1,22 @@
 namespace AudioCpp.Server;
 
+/// <summary>
+/// Limits the API enforces, which a client needs to know before it sends.
+/// </summary>
+public static class ServerLimits
+{
+    /// <summary>
+    /// 5 MiB, as the reference server documents for inline voice references.
+    /// </summary>
+    /// <remarks>
+    /// Public because it is part of the contract: a client deciding between an
+    /// inline reference and staging a file needs the number, and a test
+    /// checking the boundary should use the same one the server does rather
+    /// than a copy that can drift.
+    /// </remarks>
+    public const int MaxInlineReferenceBytes = 5 * 1024 * 1024;
+}
+
 /// <summary>One model the server offers, as server.json declares it.</summary>
 /// <param name="Id">The name a client uses in a request.</param>
 /// <param name="Family">Family hint, or empty to identify from the path.</param>

@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using AudioCpp;
 
 namespace AudioCpp.Bindings.Gui;
 

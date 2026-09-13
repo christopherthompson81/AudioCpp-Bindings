@@ -76,5 +76,21 @@ await using (var third = new AudioCppServer())
     await third.StopAsync();
 }
 
+// The routes that need a model run only when one is given: the suite stays
+// model-free by default, as the rest of it is.
+var speechModel = Environment.GetEnvironmentVariable("AUDIOCPP_TTS_MODEL");
+if (speechModel is { Length: > 0 } && (File.Exists(speechModel) || Directory.Exists(speechModel)))
+{
+    Console.WriteLine();
+    failures += await AudioCpp.ServerTest.Speech.RunAsync(
+        speechModel,
+        Environment.GetEnvironmentVariable("AUDIOCPP_TTS_FAMILY") ?? "",
+        Environment.GetEnvironmentVariable("AUDIOCPP_BACKEND") ?? "cpu");
+}
+else
+{
+    Console.WriteLine("\nno AUDIOCPP_TTS_MODEL; skipping the routes that need one");
+}
+
 Console.WriteLine(failures == 0 ? "server OK" : $"server: {failures} failure(s)");
 return failures == 0 ? 0 : 1;

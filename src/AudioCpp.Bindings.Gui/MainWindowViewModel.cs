@@ -6,6 +6,7 @@ using AudioCpp.Native;
 using AudioCpp.Packages;
 using AudioCpp.Audio;
 using Avalonia.Threading;
+using AudioCpp;
 
 namespace AudioCpp.Bindings.Gui;
 

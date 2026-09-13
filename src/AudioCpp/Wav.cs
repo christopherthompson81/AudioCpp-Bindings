@@ -1,12 +1,33 @@
-namespace AudioCpp.Bindings.Gui;
+namespace AudioCpp;
 
-/// <summary>Minimal 16-bit PCM WAV read/write, so the sample needs no audio package.</summary>
-internal static class Wav
+/// <summary>
+/// Minimal 16-bit PCM WAV read and write.
+/// </summary>
+/// <remarks>
+/// Public and in the bindings rather than in one app: the ABI takes and returns
+/// interleaved float PCM, so every consumer needs this and would otherwise
+/// write it again. It was internal to the desktop app until the server needed
+/// the same thing.
+/// </remarks>
+public static class Wav
 {
-    internal static (float[] Samples, int SampleRate, int Channels) Read(string path)
+    public static (float[] Samples, int SampleRate, int Channels) Read(string path)
     {
-        using var stream = File.OpenRead(path);
-        using var reader = new BinaryReader(stream);
+        using var file = File.OpenRead(path);
+        return Read(file);
+    }
+
+    /// <summary>
+    /// Read from any stream.
+    /// </summary>
+    /// <remarks>
+    /// The server decodes base64 reference audio that never touches the disk,
+    /// so reading has to work without a path. The path overload is this one
+    /// with a file opened for it.
+    /// </remarks>
+    public static (float[] Samples, int SampleRate, int Channels) Read(Stream stream)
+    {
+        using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, leaveOpen: true);
 
         if (new string(reader.ReadChars(4)) != "RIFF") throw new InvalidDataException("not a RIFF file");
         reader.ReadUInt32();
@@ -46,10 +67,23 @@ internal static class Wav
         throw new InvalidDataException("no data chunk");
     }
 
-    internal static void Write(string path, ReadOnlySpan<float> samples, int sampleRate, int channels)
+    public static void Write(string path, ReadOnlySpan<float> samples, int sampleRate, int channels)
     {
-        using var stream = File.Create(path);
-        using var writer = new BinaryWriter(stream);
+        using var file = File.Create(path);
+        Write(file, samples, sampleRate, channels);
+    }
+
+    /// <summary>The WAV bytes, for a response body that is never a file.</summary>
+    public static byte[] ToBytes(ReadOnlySpan<float> samples, int sampleRate, int channels)
+    {
+        using var memory = new MemoryStream();
+        Write(memory, samples, sampleRate, channels);
+        return memory.ToArray();
+    }
+
+    public static void Write(Stream stream, ReadOnlySpan<float> samples, int sampleRate, int channels)
+    {
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true);
         var dataBytes = samples.Length * 2;
 
         writer.Write("RIFF"u8);
