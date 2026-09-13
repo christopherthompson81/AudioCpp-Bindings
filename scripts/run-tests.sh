@@ -104,6 +104,13 @@ package_status=$?
 [ $package_status -ne 0 ] && [ $package_status -ne 77 ] && exit 1
 
 echo
+# Needs an audio backend rather than a model, and skips without one.
+echo "== audio capture =="
+run tests/AudioCpp.CaptureTest/AudioCpp.CaptureTest.csproj
+capture_status=$?
+[ $capture_status -ne 0 ] && [ $capture_status -ne 77 ] && exit 1
+
+echo
 echo "== C# path test =="
 run tests/AudioCpp.PathTest/AudioCpp.PathTest.csproj \
     "$VAD_MODEL" "$SAMPLE_WAV" cpu
