@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Runtime.CompilerServices;
 using AudioCpp.Native;
+using AudioCpp.Packages;
 
 namespace AudioCpp.Bindings.Gui;
 
@@ -30,6 +31,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private double _chunkSeconds = 10;
     private string _vadAssetPath = "";
     private string _resultJson = "";
+    private readonly PackageInstaller _installer = new();
+    private CatalogEntry? _selectedEntry;
+    private string _modelsRoot = DefaultModelsRoot();
+    private double _installFraction;
+    private string _installStatus = "";
     private CancellationTokenSource? _cancel;
     private string _task = "asr";
     private string _audioPath = "";
@@ -60,6 +66,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // on load; an empty row would read as a broken layout rather than an
         // unloaded one.
         foreach (var task in Tasks) TaskChips.Add(new TaskChip(task, TitleFor(task), 0));
+
+        InstallCommand = new RelayCommand(
+            InstallAsync, () => !_busy && _selectedEntry is { IsInstalled: false }
+                                && _selectedEntry.Package.Download.Supported);
+        DeleteCommand = new RelayCommand(
+            DeleteAsync, () => !_busy && _selectedEntry is { State: not InstallState.Missing });
+
+        LoadCatalog();
     }
 
     public RelayCommand LoadCommand { get; }
@@ -73,6 +87,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// long-text synthesis. Disabled when there is nothing loop-shaped to stop.
     /// </summary>
     public RelayCommand CancelCommand { get; }
+
+    /// <summary>Fetch the selected package's files.</summary>
+    public RelayCommand InstallCommand { get; }
+
+    /// <summary>Remove an installed package's files from the models root.</summary>
+    public RelayCommand DeleteCommand { get; }
 
     /// <summary>Set by the view so file pickers can be opened from here.</summary>
     public Func<string, bool, Task<string?>>? PickPath { get; set; }
@@ -95,6 +115,46 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         get => TaskChips.FirstOrDefault(c => c.Task == _task);
         set { if (value is not null) Task = value.Task; }
     }
+
+    /// <summary>Installable packages, read from audio.cpp's model_specs.</summary>
+    public ObservableCollection<CatalogEntry> CatalogEntries { get; } = [];
+
+    /// <summary>
+    /// Picking a package fills in the path and family, which is the whole point:
+    /// the reference UI is a dropdown where this app had a path box.
+    /// </summary>
+    public CatalogEntry? SelectedEntry
+    {
+        get => _selectedEntry;
+        set
+        {
+            if (!Set(ref _selectedEntry, value)) return;
+            InstallCommand.RaiseCanExecuteChanged();
+            DeleteCommand.RaiseCanExecuteChanged();
+            Notify(nameof(SelectedSummary));
+            if (value is null) return;
+
+            FamilyHint = value.Family.Family;
+            if (value.IsInstalled) ModelPath = value.ResolvePath(ModelsRoot);
+        }
+    }
+
+    public string ModelsRoot
+    {
+        get => _modelsRoot;
+        set { if (Set(ref _modelsRoot, value)) RefreshCatalogState(); }
+    }
+
+    /// <summary>0 to 1 while installing; drives the progress bar.</summary>
+    public double InstallFraction { get => _installFraction; private set => Set(ref _installFraction, value); }
+
+    public string InstallStatus { get => _installStatus; private set => Set(ref _installStatus, value); }
+
+    public string SelectedSummary => _selectedEntry is null
+        ? "No package selected"
+        : _selectedEntry.Note.Length > 0
+            ? _selectedEntry.Note
+            : $"{_selectedEntry.StateText}   {_selectedEntry.SizeText}".Trim();
 
     /// <summary>Whatever the loaded family declares, read at runtime rather than hardcoded.</summary>
     public ObservableCollection<DeclaredOption> Options { get; } = [];
@@ -271,6 +331,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (!Set(ref _busy, value)) return;
             Notify(nameof(RunState));
             CancelCommand.RaiseCanExecuteChanged();
+            InstallCommand.RaiseCanExecuteChanged();
+            DeleteCommand.RaiseCanExecuteChanged();
             LoadCommand.RaiseCanExecuteChanged();
             RunCommand.RaiseCanExecuteChanged();
             SaveWavCommand.RaiseCanExecuteChanged();
@@ -652,6 +714,171 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
         Add(gs, ge);
         return groups;
+    }
+
+    /// <summary>
+    /// Default models root. Follows the platform's application-data convention
+    /// rather than writing beside the executable, which is often read-only when
+    /// an app is installed properly.
+    /// </summary>
+    private static string DefaultModelsRoot()
+    {
+        var configured = Environment.GetEnvironmentVariable("AUDIOCPP_MODELS_ROOT");
+        if (configured is { Length: > 0 }) return configured;
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "audiocpp", "models");
+    }
+
+    /// <summary>
+    /// Find audio.cpp's model_specs. Same resolution problem as the native
+    /// library: an explicit setting, else a checkout beside this one.
+    /// </summary>
+    private static string? FindModelSpecs()
+    {
+        var configured = Environment.GetEnvironmentVariable("AUDIOCPP_MODEL_SPECS");
+        if (configured is { Length: > 0 } && Directory.Exists(configured)) return configured;
+
+        var roots = new List<string>();
+        var native = Environment.GetEnvironmentVariable("AUDIOCPP_NATIVE_DIR");
+        for (var dir = native is { Length: > 0 } ? new DirectoryInfo(native) : null;
+             dir is not null; dir = dir.Parent)
+        {
+            roots.Add(Path.Combine(dir.FullName, "model_specs"));
+        }
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            roots.Add(Path.Combine(dir.FullName, "audio.cpp", "model_specs"));
+            if (dir.Parent is not null)
+                roots.Add(Path.Combine(dir.Parent.FullName, "audio.cpp", "model_specs"));
+        }
+        return roots.FirstOrDefault(Directory.Exists);
+    }
+
+    private void LoadCatalog()
+    {
+        var specs = FindModelSpecs();
+        if (specs is null)
+        {
+            InstallStatus = "No model_specs found; the package list is unavailable. "
+                          + "Set AUDIOCPP_MODEL_SPECS to enable it.";
+            return;
+        }
+
+        var catalog = Catalog.Load(specs);
+        foreach (var family in catalog.Families.OrderBy(f => f.DisplayName, StringComparer.Ordinal))
+        {
+            foreach (var package in family.Packages)
+            {
+                CatalogEntries.Add(new CatalogEntry(family, package));
+            }
+        }
+
+        RefreshCatalogState();
+        InstallStatus = catalog.Unreadable.Count == 0
+            ? $"{CatalogEntries.Count} packages across {catalog.Families.Count} families."
+            : $"{CatalogEntries.Count} packages; {catalog.Unreadable.Count} spec(s) unreadable.";
+    }
+
+    /// <summary>
+    /// Re-read what is on disk. Local only -- no network -- so it stays instant
+    /// and works offline; download sizes are probed on demand instead.
+    /// </summary>
+    private void RefreshCatalogState()
+    {
+        foreach (var entry in CatalogEntries)
+        {
+            entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
+            if (entry.IsInstalled)
+            {
+                entry.Bytes = PackageInstaller.BytesOnDisk(ModelsRoot, entry.Package);
+            }
+        }
+        Notify(nameof(SelectedSummary));
+    }
+
+    private async Task InstallAsync()
+    {
+        if (_selectedEntry is not { } entry) return;
+
+        Busy = true;
+        InstallFraction = 0;
+        _cancel = new CancellationTokenSource();
+        CancelCommand.RaiseCanExecuteChanged();
+        try
+        {
+            var probe = await _installer.ProbeAsync(entry.Package, _cancel.Token);
+            if (!probe.Available)
+            {
+                // The spec declares packages the repository does not serve. Say so
+                // plainly rather than failing part-way through a download.
+                entry.Note = $"Unavailable: {probe.Problem}";
+                InstallStatus = entry.Note;
+                Notify(nameof(SelectedSummary));
+                return;
+            }
+
+            entry.Bytes = probe.Bytes;
+            var progress = new Progress<InstallProgress>(p =>
+            {
+                InstallFraction = p.Fraction;
+                InstallStatus = $"{p.File}  ({p.FileIndex}/{p.FileCount})  "
+                              + $"{p.BytesDone / 1024.0 / 1024.0:F0} of "
+                              + $"{p.BytesTotal / 1024.0 / 1024.0:F0} MB";
+            });
+
+            await _installer.InstallAsync(ModelsRoot, entry.Package, progress, _cancel.Token);
+
+            entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
+            entry.Bytes = PackageInstaller.BytesOnDisk(ModelsRoot, entry.Package);
+            ModelPath = entry.ResolvePath(ModelsRoot);
+            InstallStatus = $"Installed {entry.Title}.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Leave the partials: CleanPartials is the user's call, and a resumed
+            // install would otherwise start from zero.
+            entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
+            InstallStatus = "Install cancelled.";
+        }
+        catch (Exception exception) when (exception is HttpRequestException
+                                          or InvalidOperationException or IOException)
+        {
+            entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
+            InstallStatus = $"Install failed: {exception.Message}";
+        }
+        finally
+        {
+            _cancel?.Dispose();
+            _cancel = null;
+            InstallFraction = 0;
+            Busy = false;
+            InstallCommand.RaiseCanExecuteChanged();
+            DeleteCommand.RaiseCanExecuteChanged();
+            Notify(nameof(SelectedSummary));
+        }
+    }
+
+    private Task DeleteAsync()
+    {
+        if (_selectedEntry is not { } entry) return System.Threading.Tasks.Task.CompletedTask;
+
+        try
+        {
+            PackageInstaller.Delete(ModelsRoot, entry.Package);
+            entry.State = PackageInstaller.StateOf(ModelsRoot, entry.Package);
+            entry.Bytes = 0;
+            InstallStatus = $"Deleted {entry.Title}.";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            InstallStatus = $"Delete failed: {exception.Message}";
+        }
+        InstallCommand.RaiseCanExecuteChanged();
+        DeleteCommand.RaiseCanExecuteChanged();
+        Notify(nameof(SelectedSummary));
+        return System.Threading.Tasks.Task.CompletedTask;
     }
 
     private Task CancelAsync()

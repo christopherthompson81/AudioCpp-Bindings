@@ -105,6 +105,44 @@
           <Border Grid.Column="0" Classes="Card" VerticalAlignment="Top">
             <StackPanel Spacing="10">
               <TextBlock Text="MODEL" Classes="Eyebrow" />
+
+              <!-- The package picker the reference UI leads with. Falls back to
+                   the path box below, which still takes anything on disk. -->
+              <ComboBox ItemsSource="{Binding CatalogEntries}"
+                        SelectedItem="{Binding SelectedEntry}"
+                        HorizontalAlignment="Stretch"
+                        PlaceholderText="choose a package…">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:CatalogEntry">
+                    <StackPanel>
+                      <TextBlock Text="{Binding Title}" />
+                      <TextBlock Text="{Binding Subtitle}" Classes="Subtle" FontSize="11" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+
+              <Border Background="{DynamicResource AppChip}"
+                      BorderBrush="{DynamicResource AppLine}" BorderThickness="1"
+                      CornerRadius="8" Padding="12,9">
+                <StackPanel Spacing="7">
+                  <TextBlock Text="{Binding SelectedSummary}" Classes="Subtle"
+                             TextWrapping="Wrap" />
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Button Content="Install" Command="{Binding InstallCommand}" />
+                    <Button Content="Delete" Command="{Binding DeleteCommand}" />
+                  </StackPanel>
+                  <ProgressBar Value="{Binding InstallFraction}" Minimum="0" Maximum="1"
+                               Height="4" IsVisible="{Binding Busy}" />
+                </StackPanel>
+              </Border>
+
+              <TextBlock Text="{Binding InstallStatus}" Classes="Subtle" TextWrapping="Wrap"
+                         FontSize="11" />
+              <TextBox Text="{Binding ModelsRoot}" PlaceholderText="models root" />
+
+              <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,4" />
+
               <TextBox Text="{Binding ModelPath}"
                        PlaceholderText="path to a .gguf or model directory" />
               <StackPanel Orientation="Horizontal" Spacing="6">
