@@ -320,6 +320,19 @@ internal static class LiveCheck
                             }
                         }
 
+                        // Unloading clears the stems, so the panel must not be
+                        // left pointing at a tab that is no longer there.
+                        await viewModel.UnloadCommand.ExecuteAsync();
+                        await Task.Delay(300);
+                        Console.WriteLine($"after unload: tab {viewModel.ResultTab}, "
+                                          + $"streams {viewModel.OutputStreams.Count}, "
+                                          + $"preview '{viewModel.PreviewLabel}'");
+                        if (viewModel.OutputStreams.Count == 0 && viewModel.ResultTab == 2)
+                        {
+                            Console.Error.WriteLine("left on the streams tab with no streams");
+                            failures++;
+                        }
+
                         Console.WriteLine(failures == 0 ? "streams OK" : $"streams: {failures} failure(s)");
                         Environment.Exit(failures == 0 ? 0 : 1);
                         return;
