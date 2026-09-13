@@ -232,6 +232,23 @@ internal static class LiveCheck
                         number.Value = "";
                     }
 
+                    if (args.Contains("--with-events"))
+                    {
+                        // Do something worth logging before the screenshot, so
+                        // the runtime page is not photographed empty.
+                        await viewModel.RunCommand.ExecuteAsync();
+                        await viewModel.UnloadCommand.ExecuteAsync();
+                        Console.WriteLine($"log entries: {viewModel.SessionLog.Count}");
+                        foreach (var entry in viewModel.SessionLog)
+                            Console.WriteLine($"  {entry.Time} {entry.Kind,-7} {entry.Message}");
+                    }
+
+                    if (args.FirstOrDefault(a => a.StartsWith("page="))?["page=".Length..] is { } page)
+                    {
+                        viewModel.Page = page;
+                        await Task.Delay(300);
+                    }
+
                     if (args.FirstOrDefault(a => a.StartsWith("theme="))?["theme=".Length..] is { } theme)
                     {
                         viewModel.Theme = theme;
