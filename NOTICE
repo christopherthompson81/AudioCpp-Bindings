@@ -1,0 +1,18 @@
+AudioCpp-Bindings
+
+This product includes translations from audio.cpp.
+
+  https://github.com/0xShug0/audio.cpp
+  Copyright 2026 ShugoAI LLC
+  Licensed under the Apache License, Version 2.0
+
+The Italian, Polish, Russian and Simplified Chinese strings in
+src/AudioCpp.Bindings.Gui/Resources/Strings.{it,pl,ru,zh}.resx are taken
+verbatim from that project's web UI language files
+(webui/native/lang/lang_<code>.json), for the keys this application shares
+with it. They are imported, unmodified, by
+tools/locales/import_webui_locales.py; the importer refuses to run if the
+English text behind a shared key has diverged.
+
+English strings for keys shared with that project also follow its wording, for
+the same reason.
