@@ -2,10 +2,12 @@
   <Folder Name="/src/">
     <Project Path="src/AudioCpp/AudioCpp.csproj" />
     <Project Path="src/AudioCpp.Bindings.Gui/AudioCpp.Bindings.Gui.csproj" />
+    <Project Path="src/AudioCpp.Audio/AudioCpp.Audio.csproj" />
     <Project Path="src/AudioCpp.Packages/AudioCpp.Packages.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AudioCpp.BindingCoverage/AudioCpp.BindingCoverage.csproj" />
+    <Project Path="tests/AudioCpp.CaptureTest/AudioCpp.CaptureTest.csproj" />
     <Project Path="tests/AudioCpp.ModelTest/AudioCpp.ModelTest.csproj" />
     <Project Path="tests/AudioCpp.PackageTest/AudioCpp.PackageTest.csproj" />
     <Project Path="tests/AudioCpp.PathTest/AudioCpp.PathTest.csproj" />
