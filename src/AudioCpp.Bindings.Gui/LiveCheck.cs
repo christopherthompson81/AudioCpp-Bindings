@@ -254,6 +254,90 @@ internal static class LiveCheck
                         number.Value = "";
                     }
 
+                    // Run and stay loaded, so a screenshot shows a result.
+                    // --with-events unloads afterwards, which clears the panel
+                    // the screenshot was meant to capture.
+                    if (args.Contains("--run"))
+                    {
+                        await viewModel.RunCommand.ExecuteAsync();
+                        await Task.Delay(400);
+                        Console.WriteLine($"run: {viewModel.Status}");
+                        Console.WriteLine($"  rows={viewModel.Rows.Count} "
+                                          + $"streams={viewModel.OutputStreams.Count} "
+                                          + $"artifacts={viewModel.Artifacts.Count} "
+                                          + $"preview={viewModel.HasPreviewAudio} "
+                                          + $"saveWav={viewModel.SaveWavCommand.CanExecute(null)}");
+                    }
+
+                    // Separation returns a buffer per stem and no single
+                    // output, so the transport has to be pointed at one. Play
+                    // routes through the same player as everything else, which
+                    // is why the playhead applies to whatever the rows chose.
+                    if (args.Contains("--stream-check"))
+                    {
+                        if (viewModel.OutputStreams.Count < 2)
+                        {
+                            Console.Error.WriteLine($"expected stems, got "
+                                                    + $"{viewModel.OutputStreams.Count}");
+                            failures++;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"result tab opened on index {viewModel.ResultTab} "
+                                              + "(2 = streams)");
+                            if (viewModel.ResultTab != 2)
+                            {
+                                Console.Error.WriteLine("a separation did not open on its stems");
+                                failures++;
+                            }
+
+                            foreach (var stem in viewModel.OutputStreams)
+                            {
+                                await viewModel.PlayStreamAsync(stem);
+                                await Task.Delay(700);
+                                Console.WriteLine($"  {stem.Id,-14} '{viewModel.PreviewLabel}' "
+                                                  + $"playhead {viewModel.PlayProgress:F3} "
+                                                  + $"{viewModel.PlayStatus}");
+                                if (!viewModel.PreviewLabel.Contains(stem.Id, StringComparison.Ordinal))
+                                {
+                                    Console.Error.WriteLine($"  transport does not say it is on {stem.Id}");
+                                    failures++;
+                                }
+                                if (viewModel.PlayProgress <= 0)
+                                {
+                                    Console.Error.WriteLine($"  {stem.Id} did not play");
+                                    failures++;
+                                }
+                                await viewModel.PlayCommand.ExecuteAsync();   // pause
+
+                                if (args.FirstOrDefault(a => a.StartsWith("streamsOut="))
+                                        ?["streamsOut=".Length..] is { } directory)
+                                {
+                                    var path = System.IO.Path.Combine(directory, $"{stem.Id}.wav");
+                                    Wav.Write(path, stem.Samples, stem.SampleRate, stem.Channels);
+                                    Console.WriteLine($"    wrote {path}");
+                                }
+                            }
+                        }
+
+                        // Unloading clears the stems, so the panel must not be
+                        // left pointing at a tab that is no longer there.
+                        await viewModel.UnloadCommand.ExecuteAsync();
+                        await Task.Delay(300);
+                        Console.WriteLine($"after unload: tab {viewModel.ResultTab}, "
+                                          + $"streams {viewModel.OutputStreams.Count}, "
+                                          + $"preview '{viewModel.PreviewLabel}'");
+                        if (viewModel.OutputStreams.Count == 0 && viewModel.ResultTab == 2)
+                        {
+                            Console.Error.WriteLine("left on the streams tab with no streams");
+                            failures++;
+                        }
+
+                        Console.WriteLine(failures == 0 ? "streams OK" : $"streams: {failures} failure(s)");
+                        Environment.Exit(failures == 0 ? 0 : 1);
+                        return;
+                    }
+
                     if (args.Contains("--with-events"))
                     {
                         // Do something worth logging before the screenshot, so

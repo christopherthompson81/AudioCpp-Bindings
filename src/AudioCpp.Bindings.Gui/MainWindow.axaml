@@ -595,7 +595,7 @@
               <TextBlock Text="{Binding [result.label], Source={x:Static res:Loc.Current}, Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
               <TextBlock Text="{Binding [result.title], Source={x:Static res:Loc.Current}}" Classes="Title" />
 
-              <TabControl>
+              <TabControl SelectedIndex="{Binding ResultTab}">
                 <TabItem Header="Transcript">
                   <TextBox Text="{Binding Transcript}" IsReadOnly="True" AcceptsReturn="True"
                            TextWrapping="Wrap" Height="300" FontSize="13" />
@@ -625,8 +625,16 @@
                               <TextBlock Text="{Binding Id}" Classes="Label" />
                               <TextBlock Text="{Binding Summary}" Classes="Subtle" FontSize="11" />
                             </StackPanel>
-                            <Button Grid.Column="1" Content="Save…"
-                                    Click="OnSaveStream" Tag="{Binding}" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                              <!-- The rows choose what the transport plays; the
+                                   playhead and waveform below then refer to the
+                                   same thing. Separation is the whole reason:
+                                   saving a stem to hear it is not a preview. -->
+                              <Button Content="{Binding [action.play], Source={x:Static res:Loc.Current}}"
+                                      Click="OnPlayStream" Tag="{Binding}" />
+                              <Button Content="{Binding [action.save], Source={x:Static res:Loc.Current}}"
+                                      Click="OnSaveStream" Tag="{Binding}" />
+                            </StackPanel>
                           </Grid>
                         </Border>
                       </DataTemplate>
@@ -673,6 +681,7 @@
                      not been cut into lines yet. -->
                 <Button Content="SRT…" Command="{Binding SaveSrtCommand}" />
                 <Button Content="VTT…" Command="{Binding SaveVttCommand}" />
+                <TextBlock Text="{Binding PreviewLabel}" Classes="Subtle" VerticalAlignment="Center" />
                 <TextBlock Text="{Binding PlayStatus}" Classes="Subtle" VerticalAlignment="Center" />
                 <TextBlock Text="{Binding OutputSummary}" Classes="Subtle"
                            VerticalAlignment="Center" />
