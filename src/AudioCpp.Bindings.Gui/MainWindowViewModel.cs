@@ -95,6 +95,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             () => _isRecording || (!_busy && _isLoaded && _task == "asr"));
 
         PlayCommand = new RelayCommand(TogglePlaybackAsync, () => HasPreviewAudio);
+        UnloadCommand = new RelayCommand(UnloadAsync, () => _isLoaded && !_busy);
 
         LoadCatalog();
         LoadCaptureDevices();
@@ -123,6 +124,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     /// <summary>Play or pause the preview.</summary>
     public RelayCommand PlayCommand { get; }
+
+    /// <summary>Free the loaded model and everything built from it.</summary>
+    public RelayCommand UnloadCommand { get; }
 
     /// <summary>Set by the view so file pickers can be opened from here.</summary>
     public Func<string, bool, Task<string?>>? PickPath { get; set; }
@@ -488,6 +492,31 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public string LoadedModelName => _model?.Family ?? "No model loaded";
 
+    /// <summary>
+    /// What the loaded weights cost on disk.
+    /// </summary>
+    /// <remarks>
+    /// On disk, not in memory: the ABI reports no runtime footprint -- there is
+    /// no audiocpp_*_memory anywhere in the header -- so claiming a VRAM figure
+    /// would mean inventing one. The file size is what can honestly be shown.
+    /// </remarks>
+    public string LoadedModelWeights
+    {
+        get
+        {
+            if (_model is null) return "";
+            var entry = AllEntries.FirstOrDefault(e => e.IsInstalled && e.Family.Family == _model.Family);
+            if (entry is { Bytes: > 0 }) return $"{entry.Bytes / 1024.0 / 1024.0:F0} MB on disk";
+
+            try
+            {
+                if (File.Exists(ModelPath)) return $"{new FileInfo(ModelPath).Length / 1024.0 / 1024.0:F0} MB on disk";
+            }
+            catch (IOException) { /* a path we cannot stat is not worth reporting */ }
+            return "";
+        }
+    }
+
     /// <summary>RESIDENT once weights are in memory, matching the web UI's wording.</summary>
     public string LoadedModelState => _model is null ? "NONE" : _session is null ? "AVAILABLE" : "RESIDENT";
 
@@ -537,6 +566,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             if (!Set(ref _busy, value)) return;
             Notify(nameof(RunState));
+            UnloadCommand.RaiseCanExecuteChanged();
             CancelCommand.RaiseCanExecuteChanged();
             InstallCommand.RaiseCanExecuteChanged();
             DeleteCommand.RaiseCanExecuteChanged();
@@ -663,6 +693,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(SelectedChip));
             Notify(nameof(LoadedModelName));
             Notify(nameof(LoadedModelState));
+            Notify(nameof(LoadedModelWeights));
+            UnloadCommand.RaiseCanExecuteChanged();
             ChunkBudget = TextChunker.DefaultBudget(model.Family);
             IsLoaded = true;
             Status = $"Loaded {model.Family} — {Options.Count} declared option(s), read from the model."
@@ -1187,6 +1219,61 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// none is, and used both by the Record button and on shutdown -- without
     /// the latter the microphone stays open until the process exits.
     /// </summary>
+    /// <summary>
+    /// Free the model, its sessions and the registry.
+    /// </summary>
+    /// <remarks>
+    /// Loading a different model already frees the previous one, but only at the
+    /// moment the next load succeeds. Without an explicit unload there is no way
+    /// to give back a 3 GB model except by closing the app, which matters on a
+    /// machine where something else wants the GPU.
+    /// </remarks>
+    private async Task UnloadAsync()
+    {
+        await StopAudioAsync();
+
+        await System.Threading.Tasks.Task.Run(() =>
+        {
+            _vadSession?.Dispose();
+            _vadModel?.Dispose();
+            _session?.Dispose();
+            _model?.Dispose();
+            _registry?.Dispose();
+            _vadSession = null;
+            _vadModel = null;
+            _vadSessionKey = "";
+            _session = null;
+            _sessionKey = "";
+            _model = null;
+            _registry = null;
+        });
+
+        Options.Clear();
+        RequestOptions.Clear();
+        SessionOptions.Clear();
+        Rows.Clear();
+        Transcript = "";
+        ResultJson = "";
+        ModelSummary = "";
+        // Output belongs to a run and goes with the model. The input clip is the
+        // user's own file and does not, so it survives an unload and stays
+        // previewable.
+        _outputSamples = null;
+        IsLoaded = false;
+
+        for (var i = 0; i < TaskChips.Count; i++) TaskChips[i] = TaskChips[i] with { Count = 0 };
+
+        Notify(nameof(LoadedModelName));
+        Notify(nameof(LoadedModelState));
+        Notify(nameof(LoadedModelWeights));
+        Notify(nameof(HasPreviewAudio));
+        UnloadCommand.RaiseCanExecuteChanged();
+        RunCommand.RaiseCanExecuteChanged();
+        RecordCommand.RaiseCanExecuteChanged();
+        PlayCommand.RaiseCanExecuteChanged();
+        Status = "Unloaded. The model and its sessions are freed.";
+    }
+
     /// <summary>Release audio devices held for preview and capture.</summary>
     public async Task StopAudioAsync()
     {
