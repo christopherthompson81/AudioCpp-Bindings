@@ -473,6 +473,29 @@ internal static class LiveCheck
                     // would make the tab a model lands on depend on iteration
                     // order, and a task in none is unreachable, which is what
                     // #36 was about.
+                    // Every task name the installed specs actually use has to be
+                    // in the vocabulary. Upstream adding one this does not know
+                    // would silently hide those packages from every tab, which
+                    // is exactly how the music workflow came to be empty.
+                    var declared = viewModel.AllEntries
+                        .SelectMany(e => e.Family.Tasks)
+                        .Distinct().OrderBy(t => t, StringComparer.Ordinal).ToList();
+                    var unmapped = declared
+                        .Where(t => SpecTasks.Abi(t) is null && !SpecTasks.Unmappable.ContainsKey(t))
+                        .ToList();
+                    foreach (var (name, why) in SpecTasks.Unmappable
+                                 .Where(u => declared.Contains(u.Key)))
+                    {
+                        Console.WriteLine($"  '{name}' is deliberately unmapped: {why}");
+                    }
+                    Console.WriteLine($"  spec vocabulary in use: {string.Join(" ", declared)}");
+                    if (unmapped.Count > 0)
+                    {
+                        Console.Error.WriteLine($"  spec tasks with no ABI token: "
+                                                + string.Join(", ", unmapped));
+                        failures++;
+                    }
+
                     // Per-task package counts, so a task nothing declares shows
                     // up here rather than as an empty chip in the window.
                     viewModel.CurrentWorkflow = "asr";
