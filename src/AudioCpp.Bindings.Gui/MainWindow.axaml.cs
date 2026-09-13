@@ -19,6 +19,15 @@ public partial class MainWindow : Window
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
+    private async void OnSaveStream(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: NamedAudioEntry stream }
+            && DataContext is MainWindowViewModel viewModel)
+        {
+            await viewModel.SaveStreamAsync(stream);
+        }
+    }
+
     /// <summary>
     /// Release the microphone on close. Without this it stays open until the
     /// process exits, which on most desktops leaves a recording indicator lit

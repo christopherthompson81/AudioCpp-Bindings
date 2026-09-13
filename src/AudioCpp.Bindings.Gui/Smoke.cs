@@ -141,6 +141,26 @@ internal static class Smoke
             Console.WriteLine($"  {row.Kind,-9} {row.Span,-16} {row.Value}");
         }
         Console.WriteLine($"rows: {viewModel.Rows.Count}");
+        if (viewModel.OutputStreams.Count > 0)
+        {
+            Console.WriteLine($"streams: {viewModel.OutputStreams.Count}");
+            foreach (var stream in viewModel.OutputStreams)
+                Console.WriteLine($"  {stream.Id}  {stream.Summary}");
+        }
+        if (viewModel.Artifacts.Count > 0)
+        {
+            Console.WriteLine($"artifacts: {viewModel.Artifacts.Count}");
+            foreach (var artifact in viewModel.Artifacts.Take(3))
+                Console.WriteLine($"  {artifact.Id}  {artifact.Summary}");
+        }
+        Console.WriteLine($"timing: {viewModel.TimingBreakdown}");
+        Console.WriteLine($"word timings: {viewModel.HasWordTimings}");
+        if (args.Contains("--srt") && viewModel.HasWordTimings)
+        {
+            var srt = viewModel.SubtitlePreview("srt");
+            Console.WriteLine("--- first cues ---");
+            Console.WriteLine(string.Join("\n", srt.Split('\n').Take(12)));
+        }
 
         var produced = viewModel.Transcript.Length > 0
                        || viewModel.OutputSamples.Length > 0
