@@ -154,7 +154,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         nameof(ModelPath), nameof(FamilyHint), nameof(ModelsRoot),
         nameof(SelectedPackages), nameof(VadModelPath), nameof(VadAssetPath), nameof(MinSegmentSpan), nameof(MaxSegmentSpan),
         nameof(UseBuiltInChunking), nameof(ChunkSeconds), nameof(SplitLongText), nameof(ChunkBudget),
-        nameof(AudioPath), nameof(VoiceId), nameof(ShowAllOptions),
+        nameof(AudioPath), nameof(VoiceId), nameof(SpeechLanguage), nameof(ShowAllOptions),
     ];
 
     /// <summary>Where settings are kept, so a user can find or delete the file.</summary>
@@ -181,6 +181,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ChunkBudget = ChunkBudget,
         AudioPath = AudioPath,
         VoiceId = VoiceId,
+        SpeechLanguage = SpeechLanguage,
         ShowAllOptions = ShowAllOptions,
     };
 
@@ -235,6 +236,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             // reads as the app being broken rather than as the file being gone.
             if (saved.AudioPath is { Length: > 0 } audio && File.Exists(audio)) AudioPath = audio;
             if (saved.VoiceId is { } voiceId) VoiceId = voiceId;
+            // Kept even though no model is loaded yet to validate it against:
+            // the load drops it if the model does not declare it.
+            if (saved.SpeechLanguage is { } speechLanguage) SpeechLanguage = speechLanguage;
             if (saved.ShowAllOptions is { } showAll) ShowAllOptions = showAll;
 
             // Explicitly, not as a side effect of setting the workflow: a saved
@@ -607,6 +611,56 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public IReadOnlyList<string> Languages => Resources.Loc.Available;
+
+    /// <summary>
+    /// Languages the loaded model says it speaks, with a blank first entry
+    /// meaning "let the model decide".
+    /// </summary>
+    /// <remarks>
+    /// Families do not share a vocabulary: Chatterbox declares "en", "de";
+    /// Qwen3-TTS declares "english", "german", plus an explicit "Auto". So a
+    /// fixed value cannot work across models -- this app sent "en-us" for every
+    /// request, which Qwen3 rejects outright with "unsupported language:
+    /// en-us". Offering what the model declares is the only thing that
+    /// generalises, and blank sends nothing at all, which the ABI documents as
+    /// allowed.
+    /// </remarks>
+    public ObservableCollection<string> SpeechLanguages { get; } = [""];
+
+    private string _speechLanguage = "";
+    private string _voiceDescription = "";
+
+    /// <summary>
+    /// What the designed voice should sound like.
+    /// </summary>
+    /// <remarks>
+    /// Voice design takes two inputs and this app sent one: the description
+    /// went into the text field, so the model dutifully *read the description
+    /// aloud* -- transcribing the output gave back "A warm, calm, middle-aged
+    /// male voice with measured pacing and a slight rasp." The description is a
+    /// separate request option, which upstream's server spells "instruction".
+    /// </remarks>
+    public string VoiceDescription
+    {
+        get => _voiceDescription;
+        set => Set(ref _voiceDescription, value);
+    }
+
+    public bool ShowVoiceDescription => _task == "vdes";
+
+    public string SpeechLanguage
+    {
+        get => _speechLanguage;
+        set => Set(ref _speechLanguage, value);
+    }
+
+    /// <summary>Worth asking about only when the model named more than one.</summary>
+    /// <remarks>
+    /// Upstream offers this for transcription too, where it is a hint about
+    /// what is being spoken rather than what to speak.
+    /// </remarks>
+    public bool ShowSpeechLanguage =>
+        (ShowText || _task == "asr") && SpeechLanguages.Count > 1;
 
     /// <summary>
     /// Interface language. The pseudo-locale is not a translation — it is
@@ -996,6 +1050,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(ShowTextChunking));
             Notify(nameof(ShowAudioInput));
             Notify(nameof(ShowAsrAudioControls));
+            Notify(nameof(ShowVoiceDescription));
+            Notify(nameof(ShowSpeechLanguage));
             RecordCommand.RaiseCanExecuteChanged();
         }
     }
@@ -1450,6 +1506,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 $"style: {model.SupportsStyleCondition}\n" +
                 $"languages: {(model.Languages.Count > 0 ? string.Join(", ", model.Languages.Take(12)) : "unspecified")}";
 
+            var keptLanguage = SpeechLanguage;
+            SpeechLanguages.Clear();
+            SpeechLanguages.Add("");
+            foreach (var language in model.Languages) SpeechLanguages.Add(language);
+            // Keep the choice if the new model also speaks it; otherwise fall
+            // back to letting the model decide rather than sending a language
+            // it has never heard of.
+            SpeechLanguage = SpeechLanguages.Contains(keptLanguage) ? keptLanguage : "";
+            Notify(nameof(ShowSpeechLanguage));
+
             Options.Clear();
             foreach (var scope in Enum.GetValues<AudioCppOptionScope>())
             {
@@ -1663,7 +1729,24 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     // and nothing else has nothing to run without it.
                     if (Text.Length == 0 && !ShowAudioInput)
                         throw new InvalidOperationException("Enter some text first.");
-                    if (Text.Length > 0) request.SetText(Text, "en-us");
+                    if (Text.Length > 0)
+                    {
+                        request.SetText(Text, SpeechLanguage.Length > 0 ? SpeechLanguage : null);
+                    }
+                }
+
+                // Transcription never calls SetText, so a language chosen there
+                // would have been offered and then dropped. The ABI writes the
+                // option itself for a non-empty language on SetText, so this
+                // covers the tasks that path does not reach.
+                if (!ShowText && SpeechLanguage.Length > 0)
+                {
+                    request.SetOption("language", SpeechLanguage);
+                }
+
+                if (ShowVoiceDescription && VoiceDescription.Length > 0)
+                {
+                    request.SetOption("instruction", VoiceDescription);
                 }
 
                 if (ShowVoice)
@@ -1813,7 +1896,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             {
                 request.SetOption(option.Name, option.Value);
             }
-            request.SetText(piece, "en-us");
+            request.SetText(piece, SpeechLanguage.Length > 0 ? SpeechLanguage : null);
             if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
             // Every piece needs the reference, not just the first: each is its
             // own request, and a piece without one comes back in a different

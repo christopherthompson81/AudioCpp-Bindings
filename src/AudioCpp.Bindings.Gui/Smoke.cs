@@ -78,6 +78,8 @@ internal static class Smoke
                 case "split": viewModel.SplitLongText = bool.Parse(parts[1]); continue;
                 case "budget": viewModel.ChunkBudget = int.Parse(parts[1]); continue;
                 case "text": viewModel.Text = parts[1]; continue;
+                case "describe": viewModel.VoiceDescription = parts[1]; continue;
+                case "language": viewModel.SpeechLanguage = parts[1]; continue;
                 // Somewhere to put generated audio. The window has Save WAV;
                 // without this the headless path can report that a run produced
                 // 12 seconds of audio but give no way to listen to it.
