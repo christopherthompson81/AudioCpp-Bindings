@@ -111,10 +111,97 @@ internal static class SettingsCheck
                 failures++;
             }
 
+            // The picker's choice is remembered per workflow, and across a
+            // restart. Selecting in one tab, looking at another and coming back
+            // has to bring the choice back with it.
+            var picker = new MainWindowViewModel(new SettingsStore(directory));
+            picker.CurrentWorkflow = "asr";
+            var asrPick = picker.CatalogEntries.Skip(2).FirstOrDefault();
+            picker.SelectedEntry = asrPick;
+            picker.CurrentWorkflow = "tts";
+            var ttsPick = picker.CatalogEntries.Skip(1).FirstOrDefault();
+            picker.SelectedEntry = ttsPick;
+
+            Console.WriteLine($"picked asr={asrPick?.Key} tts={ttsPick?.Key}");
+            if (asrPick is null || ttsPick is null)
+            {
+                Console.Error.WriteLine("catalogue had nothing to pick"); failures++;
+            }
+            else
+            {
+                picker.CurrentWorkflow = "asr";
+                var backToAsr = picker.SelectedEntry?.Key;
+                picker.CurrentWorkflow = "tts";
+                var backToTts = picker.SelectedEntry?.Key;
+                Console.WriteLine($"  after switching away and back: asr={backToAsr} tts={backToTts}");
+                if (backToAsr != asrPick.Key || backToTts != ttsPick.Key)
+                {
+                    Console.Error.WriteLine("a tab switch lost the selection"); failures++;
+                }
+
+                Thread.Sleep(1200);   // past the debounce
+                var reopened = new MainWindowViewModel(new SettingsStore(directory));
+                var restored = reopened.SelectedEntry?.Key;
+                Console.WriteLine($"  after a restart, on {reopened.CurrentWorkflow}: {restored}");
+                if (restored != ttsPick.Key)
+                {
+                    Console.Error.WriteLine($"a restart lost the selection "
+                                            + $"(wanted {ttsPick.Key})");
+                    failures++;
+                }
+
+                // And the other tab's choice comes back too, not just the one
+                // that happened to be open when the app closed.
+                reopened.CurrentWorkflow = "asr";
+                Console.WriteLine($"  the other tab after a restart: {reopened.SelectedEntry?.Key}");
+                if (reopened.SelectedEntry?.Key != asrPick.Key)
+                {
+                    Console.Error.WriteLine("a restart kept only the open tab's selection");
+                    failures++;
+                }
+            }
+
+            // A model loaded from a path is its own choice. Restoring a
+            // remembered package must not overwrite it: selecting a package
+            // sets ModelPath as a side effect, and that side effect is right
+            // when a person clicks, wrong when it happens during a load that is
+            // also restoring a saved path.
+            var manual = new MainWindowViewModel(new SettingsStore(directory));
+            manual.CurrentWorkflow = "asr";
+            // An installed one: only an installed package sets ModelPath, so
+            // picking any entry would pass this without exercising the clobber.
+            var installed = manual.CatalogEntries.FirstOrDefault(e => e.IsInstalled);
+            if (installed is null)
+            {
+                Console.WriteLine("  no installed package; the model-path clobber is not staged");
+            }
+            manual.SelectedEntry = installed ?? manual.CatalogEntries.FirstOrDefault();
+            manual.ModelPath = "/models/hand-picked.gguf";
+            Thread.Sleep(1200);
+
+            var reloaded = new MainWindowViewModel(new SettingsStore(directory));
+            Console.WriteLine($"  saved path '/models/hand-picked.gguf' came back as "
+                              + $"'{reloaded.ModelPath}'");
+            if (installed is not null && reloaded.ModelPath != "/models/hand-picked.gguf")
+            {
+                Console.Error.WriteLine("restoring the package overwrote the saved model path");
+                failures++;
+            }
+
             // 5. Reading settings must not itself write settings: applying a
             //    saved value raises PropertyChanged like any other assignment,
             //    and a save from inside the load would race the file it read.
+            //
+            //    Let whatever the checks above queued land first, then take the
+            //    stamp, then load. Stamping while a legitimate save from an
+            //    earlier step was still in its debounce made this fail on the
+            //    test's own ordering rather than on the thing it checks.
+            Thread.Sleep(1200);
             var stamp = File.GetLastWriteTimeUtc(store.StorePath);
+            var loader = new MainWindowViewModel(new SettingsStore(directory));
+            Console.WriteLine($"  a loading window opened on {loader.CurrentWorkflow}, "
+                              + $"selection {loader.SelectedEntry?.Key ?? "(none)"}, "
+                              + $"{loader.SelectedPackages.Count} remembered");
             Thread.Sleep(1200);
             if (File.GetLastWriteTimeUtc(store.StorePath) != stamp)
             {

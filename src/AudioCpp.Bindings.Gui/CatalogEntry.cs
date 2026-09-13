@@ -36,6 +36,17 @@ public sealed class CatalogEntry(FamilySpec family, PackageSpec package)
 
     public string Subtitle => $"{Family.Family} · {Package.Format} · {Package.Precision}";
 
+    /// <summary>
+    /// A stable name for this package, for remembering a selection across a
+    /// tab switch or a restart.
+    /// </summary>
+    /// <remarks>
+    /// Family-qualified: package ids are unique within a family, not across
+    /// the catalogue, and two families can ship a package called the same
+    /// thing.
+    /// </remarks>
+    public string Key => $"{Family.Family}/{Package.Id}";
+
     /// <summary>Whether this family can do the given task, for filtering the picker.</summary>
     public bool SupportsTask(string task) => Family.Tasks.Contains(task);
 

@@ -152,7 +152,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     [
         nameof(CurrentWorkflow), nameof(Theme), nameof(Language), nameof(Backend), nameof(Threads),
         nameof(ModelPath), nameof(FamilyHint), nameof(ModelsRoot),
-        nameof(VadModelPath), nameof(VadAssetPath), nameof(MinSegmentSpan), nameof(MaxSegmentSpan),
+        nameof(SelectedPackages), nameof(VadModelPath), nameof(VadAssetPath), nameof(MinSegmentSpan), nameof(MaxSegmentSpan),
         nameof(UseBuiltInChunking), nameof(ChunkSeconds), nameof(SplitLongText), nameof(ChunkBudget),
         nameof(AudioPath), nameof(VoiceId), nameof(ShowAllOptions),
     ];
@@ -170,6 +170,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ModelPath = ModelPath,
         FamilyHint = FamilyHint,
         ModelsRoot = ModelsRoot,
+        SelectedPackages = new Dictionary<string, string>(_selectedPackages),
         VadModelPath = VadModelPath,
         VadAssetPath = VadAssetPath,
         MinSegmentSpan = MinSegmentSpan,
@@ -201,6 +202,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _applyingSettings = true;
         try
         {
+            // Before the workflow: choosing one filters the picker, and the
+            // filter is what puts the remembered package back.
+            if (saved.SelectedPackages is { Count: > 0 } packages)
+            {
+                foreach (var (id, key) in packages) _selectedPackages[id] = key;
+            }
+
             if (saved.CurrentWorkflow is { Length: > 0 } workflow
                 && Workflow.All.Any(w => w.Id == workflow)) CurrentWorkflow = workflow;
             if (saved.Theme is { Length: > 0 } theme) Theme = theme;
@@ -228,6 +236,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (saved.AudioPath is { Length: > 0 } audio && File.Exists(audio)) AudioPath = audio;
             if (saved.VoiceId is { } voiceId) VoiceId = voiceId;
             if (saved.ShowAllOptions is { } showAll) ShowAllOptions = showAll;
+
+            // Explicitly, not as a side effect of setting the workflow: a saved
+            // workflow that matches the default is not a change, so nothing
+            // would re-run the filter and the remembered package would stay
+            // unselected on exactly the most common startup.
+            //
+            // Inside the guard so this stays atomic. Nothing can save during
+            // construction anyway -- the PropertyChanged subscription is made
+            // after this runs -- but the guard is what keeps that true if
+            // ApplySettings is ever called on a live window.
+            FilterCatalog();
         }
         finally
         {
@@ -475,6 +494,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public Avalonia.Controls.AutoCompleteFilterPredicate<object?> EntryFilter { get; } =
         (search, item) => item is CatalogEntry entry && Matches(entry, search);
 
+    private readonly Dictionary<string, string> _selectedPackages = [];
+
+    /// <summary>The package chosen in each workflow, saved between launches.</summary>
+    public IReadOnlyDictionary<string, string> SelectedPackages => _selectedPackages;
+
     public CatalogEntry? SelectedEntry
     {
         get => _selectedEntry;
@@ -487,8 +511,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(StudioTitle));
             if (value is null) return;
 
-            FamilyHint = value.Family.Family;
-            if (value.IsInstalled) ModelPath = value.ResolvePath(ModelsRoot);
+            // Remembered against the workflow it was chosen in, so switching
+            // tabs and coming back does not lose it.
+            _selectedPackages[_workflow] = value.Key;
+            Notify(nameof(SelectedPackages));
+
+            // Choosing a package points the loader at it. Restoring a
+            // remembered one must not: the family hint and the model path are
+            // saved in their own right, and a person who last pointed at a
+            // hand-picked .gguf would get the package's path back instead.
+            if (!_applyingSettings)
+            {
+                FamilyHint = value.Family.Family;
+                if (value.IsInstalled) ModelPath = value.ResolvePath(ModelsRoot);
+            }
+
             // The model decides which of the workflow's tasks this run is.
             ResolveTask();
         }
@@ -952,7 +989,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             CatalogEntries.Add(entry);
         }
 
-        SelectedEntry = keep is not null && CatalogEntries.Contains(keep) ? keep : null;
+        // Keep what is selected if it still applies; otherwise put back what was
+        // last chosen in this workflow. Dropping straight to null meant a tab
+        // switch threw the choice away, and coming back offered "choose a
+        // package…" over a model that was still loaded.
+        SelectedEntry = keep is not null && CatalogEntries.Contains(keep)
+            ? keep
+            : _selectedPackages.TryGetValue(_workflow, out var remembered)
+                ? CatalogEntries.FirstOrDefault(e => e.Key == remembered)
+                : null;
         RefreshWorkflowCounts();
         Notify(nameof(CatalogCount));
     }
