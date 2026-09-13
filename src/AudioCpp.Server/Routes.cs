@@ -53,7 +53,7 @@ internal static class Routes
         try
         {
             var result = await RunWithLanguageAsync(pool, request.Model, request.Language,
-                (model, session, language) =>
+                (session, language) =>
             {
                 using var task = new AudioCppRequest();
                 task.SetAudio(clip.Samples, clip.SampleRate, clip.Channels);
@@ -202,7 +202,7 @@ internal static class Routes
         try
         {
             var result = await RunWithLanguageAsync(pool, request.Model, request.Language,
-                (model, session, language) =>
+                (session, language) =>
             {
                 using var task = new AudioCppRequest();
                 task.SetAudio(clip.Samples, clip.SampleRate, clip.Channels);
@@ -289,33 +289,46 @@ internal static class Routes
     /// </remarks>
     private static async Task<T> RunWithLanguageAsync<T>(
         ModelPool pool, string id, string language,
-        Func<AudioCppModel, AudioCppSession, string, T> work,
+        Func<AudioCppSession, string, T> work,
         CancellationToken cancel)
     {
         if (language.Length == 0 || pool.RefusesLanguage(id))
         {
-            return await pool.UseModelAsync(id, (model, session) => work(model, session, ""), cancel);
+            return await pool.UseAsync(id, session => work(session, ""), cancel);
         }
 
         try
         {
-            return await pool.UseModelAsync(
-                id, (model, session) => work(model, session, language), cancel);
+            return await pool.UseAsync(id, session => work(session, language), cancel);
         }
         catch (AudioCppException error) when (RefusedTheLanguageOption(error))
         {
             pool.NoteLanguageRefused(id);
-            return await pool.UseModelAsync(id, (model, session) => work(model, session, ""), cancel);
+            return await pool.UseAsync(id, session => work(session, ""), cancel);
         }
     }
 
     /// <summary>
-    /// Matched on both halves, so an unrelated failure that happens to mention
-    /// a language is not mistaken for this one.
+    /// Whether this failure is the engine refusing an undeclared
+    /// <c>language</c> request option, rather than some other failure that
+    /// happens to mention a language.
     /// </summary>
-    private static bool RefusedTheLanguageOption(AudioCppException error) =>
-        error.Message.Contains("request option", StringComparison.Ordinal)
-        && error.Message.Contains("language", StringComparison.Ordinal);
+    /// <remarks>
+    /// The engine's wording is "unknown &lt;model&gt; request option: &lt;key&gt;",
+    /// so the key is matched where it appears and only as a whole word. Without
+    /// the boundary check a refusal of "language_hint" would match, and the
+    /// retry would drop the caller's language for a reason that was never
+    /// about it.
+    /// </remarks>
+    private static bool RefusedTheLanguageOption(AudioCppException error)
+    {
+        const string prefix = "request option: language";
+        var at = error.Message.IndexOf(prefix, StringComparison.Ordinal);
+        if (at < 0) return false;
+        var after = at + prefix.Length;
+        return after >= error.Message.Length
+               || !(char.IsLetterOrDigit(error.Message[after]) || error.Message[after] == '_');
+    }
 
     private sealed record Transcribed(
         string Text,
