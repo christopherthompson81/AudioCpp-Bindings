@@ -189,6 +189,10 @@ internal static class LiveCheck
                             break;
                         case "audio": viewModel.AudioPath = parts[1]; break;
                         case "modelsRoot": viewModel.ModelsRoot = parts[1]; break;
+                        case "text": viewModel.Text = parts[1]; break;
+                        case "task": viewModel.Task = parts[1]; break;
+                        case "split": viewModel.SplitLongText = bool.Parse(parts[1]); break;
+                        case "budget": viewModel.ChunkBudget = int.Parse(parts[1]); break;
                     }
                 }
 
@@ -466,7 +470,10 @@ internal static class LiveCheck
                     Console.WriteLine($"model: {viewModel.Status}");
 
                     // A whole-clip run: one call into the engine, nothing to stop.
-                    viewModel.VadModelPath = "";
+                    // For a text task this is instead "chunking off", and the
+                    // same question applies: is there a loop to interrupt?
+                    if (viewModel.ShowAudioInput) viewModel.VadModelPath = "";
+                    else viewModel.SplitLongText = false;
                     var whole = viewModel.RunCommand.ExecuteAsync();
                     await Task.Delay(400);
                     Console.WriteLine($"single call: cancel enabled={viewModel.CancelCommand.CanExecute(null)}");
@@ -482,7 +489,37 @@ internal static class LiveCheck
                     // Segmented: one call per stretch of speech, so the loop can
                     // see the token between them.
                     var vad = args.FirstOrDefault(a => a.StartsWith("vad="))?["vad=".Length..];
-                    if (vad is null)
+                    if (!viewModel.ShowAudioInput)
+                    {
+                        // The text equivalent of segmenting: splitting turns one
+                        // call into a call per piece, so there is a loop to stop.
+                        viewModel.SplitLongText = true;
+                        var pieces = TextChunker.Split(
+                            viewModel.Text, Math.Max(1, viewModel.ChunkBudget)).Count;
+                        var looped = viewModel.RunCommand.ExecuteAsync();
+
+                        // Polled, not slept: a six-piece clone on a small model
+                        // finishes inside any delay short enough to be useful,
+                        // and a fixed wait then reports "cancel unavailable" for
+                        // a run that had already ended.
+                        var everEnabled = false;
+                        while (!looped.IsCompleted && !everEnabled)
+                        {
+                            everEnabled = viewModel.CancelCommand.CanExecute(null);
+                            if (!everEnabled) await Task.Delay(5);
+                        }
+                        Console.WriteLine($"split text into {pieces} piece(s): "
+                                          + $"cancel was enabled={everEnabled}");
+                        if (!everEnabled)
+                        {
+                            Console.Error.WriteLine("cancel unavailable for a run it can stop");
+                            failures++;
+                        }
+                        if (!looped.IsCompleted) await viewModel.CancelCommand.ExecuteAsync();
+                        await looped;
+                        Console.WriteLine($"  after cancel: {viewModel.Status}");
+                    }
+                    else if (vad is null)
                     {
                         Console.Error.WriteLine("pass vad=<silero dir> to check the segmented path");
                         failures++;

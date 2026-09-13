@@ -114,7 +114,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         RecordCommand = new RelayCommand(
             ToggleRecordingAsync,
-            () => _isRecording || (!_busy && _isLoaded && _task == "asr"));
+            () => _isRecording || (!_busy && _isLoaded && ShowAsrAudioControls));
 
         PlayCommand = new RelayCommand(TogglePlaybackAsync, () => HasPreviewAudio);
         UnloadCommand = new RelayCommand(UnloadAsync, () => _isLoaded && !_busy);
@@ -870,7 +870,31 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public bool SplitLongText { get => _splitLongText; set => Set(ref _splitLongText, value); }
 
     /// <summary>Characters per piece. Defaults per family, as the reference does.</summary>
-    public int ChunkBudget { get => _chunkBudget; set => Set(ref _chunkBudget, value); }
+    /// <summary>
+    /// Characters per synthesis chunk.
+    /// </summary>
+    /// <remarks>
+    /// Loading a model suggests a default for its family, but only while the
+    /// number is still a suggestion. Once it has been set -- typed in, or
+    /// restored from the settings file -- loading a model must not quietly
+    /// replace it, which is what it did: the value was saved faithfully,
+    /// restored faithfully, and then overwritten by the next load.
+    /// </remarks>
+    public int ChunkBudget
+    {
+        get => _chunkBudget;
+        set { if (Set(ref _chunkBudget, value)) _chunkBudgetChosen = true; }
+    }
+
+    private bool _chunkBudgetChosen;
+
+    /// <summary>Suggest a family's default, without overriding a real choice.</summary>
+    private void SuggestChunkBudget(string family)
+    {
+        if (_chunkBudgetChosen) return;
+        _chunkBudget = TextChunker.DefaultBudget(family);
+        Notify(nameof(ChunkBudget));
+    }
 
     /// <summary>
     /// The pieces of the last synthesis, kept rather than only the joined clip:
@@ -1166,7 +1190,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// design start from text alone; cloning and conversion need a recording
     /// to imitate or transform.
     /// </summary>
-    public bool ShowAudioInput => _task is not ("tts" or "gen" or "vdes");
+    public bool ShowAudioInput =>
+        _task is not ("tts" or "clon" or "gen" or "vdes");
 
     /// <summary>
     /// Live transcription and long-clip chunking are both ASR concerns. Showing
@@ -1332,8 +1357,35 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 _sessionKey = "";
 
                 _registry = AudioCppRegistry.Create();
-                _model = _registry.Load(ModelPath,
-                    new ModelConfig(FamilyHint.Length > 0 ? FamilyHint : null));
+                var family = FamilyHint.Length > 0 ? FamilyHint : null;
+                try
+                {
+                    _model = _registry.Load(ModelPath, new ModelConfig(family));
+                }
+                // Only when the engine says it could not find a spec, and only
+                // then. A GGUF carries its own; handing it an external one makes
+                // it use that instead, and a model that loaded fine fails with
+                // "packed GGUF namespace does not exist". Safetensors packages
+                // are the case that needs it: nothing is embedded, and the
+                // engine only looks beside the model or up from the working
+                // directory, neither of which is where an installed package
+                // lives.
+                //
+                // Matching on the message is the only signal -- both failures
+                // return the same status. If upstream rewords it the fallback
+                // stops firing and the user sees that same message, which names
+                // --model-spec-override, so the failure explains itself.
+                catch (AudioCppException missingSpec)
+                    when (_modelSpecs is not null
+                          && missingSpec.Detail.Contains("model spec not found",
+                                                         StringComparison.Ordinal))
+                {
+                    // Whatever this throws got further than the first attempt,
+                    // so its error is the more useful one to report.
+                    _model = _registry.Load(ModelPath,
+                        new ModelConfig(family, ModelSpecOverride: _modelSpecs));
+                }
+
                 if (VadModelPath.Length > 0)
                 {
                     _vadModel = _registry.Load(VadModelPath, "silero_vad");
@@ -1392,7 +1444,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(LoadedModelWeights));
             Notify(nameof(SupportsVoiceReference));
             UnloadCommand.RaiseCanExecuteChanged();
-            ChunkBudget = TextChunker.DefaultBudget(model.Family);
+            SuggestChunkBudget(model.Family);
             IsLoaded = true;
             Status = $"Loaded {model.Family} — {Options.Count} declared option(s), read from the model."
                    + (_vadModel is not null ? $"  VAD: {_vadModel.Family}." : "");
@@ -1431,9 +1483,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // interrupted -- and a Cancel button that silently does nothing is
         // worse than one that is visibly unavailable, because the user waits
         // instead of switching to a smaller model or another backend.
-        _cancellable = Task == "tts"
+        // The same predicates the layout and the request use. Keyed on "tts"
+        // this said a long-text *clone* could not be stopped, though it runs a
+        // call per piece exactly as synthesis does.
+        _cancellable = ShowTextChunking
             ? SplitLongText && TextChunker.Split(Text, Math.Max(1, ChunkBudget)).Count > 1
-            : _vadModel is not null;
+            : ShowAudioInput && _vadModel is not null;
         Notify(nameof(CancelHint));
         CancelCommand.RaiseCanExecuteChanged();
         // Nothing stops the task being switched while a run is in flight, and a
@@ -1513,38 +1568,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 {
                     request.SetOption(option.Name, option.Value);   // an explicit edit wins
                 }
-                if (!ShowAudioInput)
-                {
-                    // Splitting is a speech concern, and only where the window
-                    // offered it. Music generation takes a prompt, not a
-                    // script -- upstream's own docs say the speech chunker does
-                    // not apply -- so cutting a prompt into pieces and
-                    // concatenating the results would produce several unrelated
-                    // clips joined end to end.
-                    if (ShowTextChunking)
-                    {
-                        // Long text goes piece by piece against one session; handing
-                        // a family more than it can take in a request either
-                        // truncates or throws, depending on the family.
-                        var pieces = SplitLongText
-                            ? TextChunker.Split(Text, Math.Max(1, ChunkBudget))
-                            : [Text];
-
-                        if (pieces.Count > 1)
-                        {
-                            transcript = RunLongText(pieces, rows);
-                            return;
-                        }
-                    }
-
-                    request.SetText(Text, "en-us");
-                    if (ShowVoice)
-                    {
-                        if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
-                        ApplyVoiceReference(request);
-                    }
-                }
-                else
+                // One place, driven by the same predicates the layout uses, so a
+                // run sends exactly what the window offered. The old shape was
+                // "tts sends text and a voice, everything else sends audio",
+                // which was true for six tasks and wrong for the seven that
+                // became reachable with the workflow tabs: cloning demanded a
+                // source clip it has no use for, conversion never sent the
+                // target voice, and speech editing never sent its text.
+                if (ShowAudioInput)
                 {
                     var input = clip!.Value;
                     if (_vadModel is not null)
@@ -1557,11 +1588,38 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                         return;
                     }
                     request.SetAudio(input.Samples, input.SampleRate, input.Channels);
+                }
+                else if (ShowTextChunking)
+                {
+                    // Splitting is a speech concern, and only where the window
+                    // offered it. Music generation takes a prompt, not a script --
+                    // upstream's own docs say the speech chunker does not apply --
+                    // so cutting a prompt into pieces and concatenating the results
+                    // would produce several unrelated clips joined end to end.
+                    var pieces = SplitLongText
+                        ? TextChunker.Split(Text, Math.Max(1, ChunkBudget))
+                        : [Text];
 
-                    // Forced alignment needs both: the audio and the transcript to
-                    // align against it. Showing a text box whose value was never
-                    // sent is the same defect as showing a control a task ignores.
-                    if (Task == "align" && Text.Length > 0) request.SetText(Text, "en-us");
+                    if (pieces.Count > 1)
+                    {
+                        transcript = RunLongText(pieces, rows);
+                        return;
+                    }
+                }
+
+                if (ShowText)
+                {
+                    // Symmetric with the audio check: a task that shows a text box
+                    // and nothing else has nothing to run without it.
+                    if (Text.Length == 0 && !ShowAudioInput)
+                        throw new InvalidOperationException("Enter some text first.");
+                    if (Text.Length > 0) request.SetText(Text, "en-us");
+                }
+
+                if (ShowVoice)
+                {
+                    if (VoiceId.Length > 0) request.SetVoiceId(VoiceId);
+                    ApplyVoiceReference(request);
                 }
 
                 var runStarted = System.Diagnostics.Stopwatch.StartNew();
@@ -1883,9 +1941,23 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return roots.FirstOrDefault(Directory.Exists);
     }
 
+    /// <summary>
+    /// Where audio.cpp's model_specs were found, handed to the loader.
+    /// </summary>
+    /// <remarks>
+    /// The engine looks for a spec beside the model or by walking up from the
+    /// process's working directory. Neither holds for an installed package
+    /// whose weights are safetensors rather than a GGUF with the spec embedded:
+    /// the download lands in the models root and the load fails with "model
+    /// spec not found for family". This app has already located the specs to
+    /// build its catalogue, so it can simply say where they are.
+    /// </remarks>
+    private string? _modelSpecs;
+
     private void LoadCatalog()
     {
         var specs = FindModelSpecs();
+        _modelSpecs = specs;
         if (specs is null)
         {
             InstallStatus = "No model_specs found; the package list is unavailable. "
@@ -2524,8 +2596,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var request = new List<KeyValuePair<string, string>>();
 
         // Only for audio tasks, only when this app is not segmenting already, and only
-        // for a family known to implement it.
-        if (Task == "tts" || _vadModel is not null || !UseBuiltInChunking) return (session, request);
+        // for a family known to implement it. "not tts" was the audio test when
+        // there were six tasks; cloning, music generation and voice design read
+        // no audio either, so a clip length would have been read for them too.
+        if (!ShowAudioInput || _vadModel is not null || !UseBuiltInChunking) return (session, request);
         if (_model?.Family != "parakeet_tdt") return (session, request);
         if (seconds < FullContextCeilingSeconds) return (session, request);
 
