@@ -544,7 +544,9 @@
                     </Border>
                   </StackPanel>
                 </Button>
-                <Button Content="{Binding [common.cancel], Source={x:Static res:Loc.Current}}" Command="{Binding CancelCommand}" />
+                <Button Content="{Binding [common.cancel], Source={x:Static res:Loc.Current}}"
+                        Command="{Binding CancelCommand}"
+                        ToolTip.Tip="{Binding CancelHint}" />
                 <TextBlock Text="{Binding RunState}" Classes="Subtle"
                            VerticalAlignment="Center" />
               </StackPanel>

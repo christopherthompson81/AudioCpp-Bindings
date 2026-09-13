@@ -300,6 +300,69 @@ internal static class LiveCheck
                     return;
                 }
 
+                // Cancel has to either stop the run or be visibly unavailable.
+                // Needs a real model: what decides the answer is the shape of
+                // the run, and that only exists once there is one.
+                if (args.Contains("--cancel-check"))
+                {
+                    await viewModel.LoadCommand.ExecuteAsync();
+                    Console.WriteLine($"model: {viewModel.Status}");
+
+                    // A whole-clip run: one call into the engine, nothing to stop.
+                    viewModel.VadModelPath = "";
+                    var whole = viewModel.RunCommand.ExecuteAsync();
+                    await Task.Delay(400);
+                    Console.WriteLine($"single call: cancel enabled={viewModel.CancelCommand.CanExecute(null)}");
+                    Console.WriteLine($"  hint: {viewModel.CancelHint}");
+                    if (viewModel.CancelCommand.CanExecute(null))
+                    {
+                        Console.Error.WriteLine("cancel offered for a run it cannot stop"); failures++;
+                    }
+                    await whole;
+                    var fullRows = viewModel.Rows.Count;
+                    Console.WriteLine($"  ran to the end: {fullRows} row(s)");
+
+                    // Segmented: one call per stretch of speech, so the loop can
+                    // see the token between them.
+                    var vad = args.FirstOrDefault(a => a.StartsWith("vad="))?["vad=".Length..];
+                    if (vad is null)
+                    {
+                        Console.Error.WriteLine("pass vad=<silero dir> to check the segmented path");
+                        failures++;
+                    }
+                    else
+                    {
+                        viewModel.VadModelPath = vad;
+                        await viewModel.LoadCommand.ExecuteAsync();
+                        var segmented = viewModel.RunCommand.ExecuteAsync();
+                        await Task.Delay(300);
+                        Console.WriteLine($"segmented: cancel enabled={viewModel.CancelCommand.CanExecute(null)}");
+                        if (!viewModel.CancelCommand.CanExecute(null))
+                        {
+                            Console.Error.WriteLine("cancel unavailable for a run it can stop"); failures++;
+                        }
+                        await viewModel.CancelCommand.ExecuteAsync();
+                        await segmented;
+                        Console.WriteLine($"  after cancel: {viewModel.Rows.Count} row(s), "
+                                          + $"status '{viewModel.Status}'");
+                        if (viewModel.Rows.Count >= fullRows && fullRows > 0)
+                        {
+                            Console.Error.WriteLine("cancelled run produced as much as a full one");
+                            failures++;
+                        }
+                    }
+
+                    Console.WriteLine($"after the run: cancel enabled={viewModel.CancelCommand.CanExecute(null)}");
+                    if (viewModel.CancelCommand.CanExecute(null))
+                    {
+                        Console.Error.WriteLine("cancel still offered with nothing running"); failures++;
+                    }
+
+                    Console.WriteLine(failures == 0 ? "cancel OK" : $"cancel: {failures} failure(s)");
+                    Environment.Exit(failures == 0 ? 0 : 1);
+                    return;
+                }
+
                 if (args.Contains("--strings-check"))
                 {
                     // One key from each area, plus one of ours that upstream
