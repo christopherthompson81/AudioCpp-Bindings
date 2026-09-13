@@ -42,6 +42,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private int _chunkBudget = 1000;
     private readonly List<AudioSegment> _segments = [];
     private CancellationTokenSource? _cancel;
+    private bool _cancellable;
     private LiveTranscription? _live;
     private bool _togglingRecording;
     private CaptureDeviceInfo? _captureDevice;
@@ -90,7 +91,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         LoadCommand = new RelayCommand(LoadAsync, () => !_busy && ModelPath.Length > 0);
         RunCommand = new RelayCommand(RunAsync, () => !_busy && _isLoaded);
         SaveWavCommand = new RelayCommand(SaveWavAsync, () => !_busy && _outputSamples is { Length: > 0 });
-        CancelCommand = new RelayCommand(CancelAsync, () => _busy && _cancel is not null);
+        CancelCommand = new RelayCommand(
+            CancelAsync, () => _busy && _cancel is not null && _cancellable);
 
         // Present before any model is loaded, as the web UI's are. Counts fill in
         // on load; an empty row would read as a broken layout rather than an
@@ -135,6 +137,23 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// long-text synthesis. Disabled when there is nothing loop-shaped to stop.
     /// </summary>
     public RelayCommand CancelCommand { get; }
+
+    /// <summary>
+    /// Why Cancel is unavailable, when it is.
+    /// </summary>
+    /// <remarks>
+    /// Shown as the button's tooltip. A disabled control with no explanation
+    /// reads as a bug; this one is a real limit of the engine's interface, and
+    /// saying so tells the user what to change -- segment the audio, or split
+    /// the text -- rather than leaving them to wait it out.
+    /// </remarks>
+    public string CancelHint => _cancellable
+        ? "Stops at the next point the work can be interrupted."
+        : _busy
+            ? "This run is one call into the engine, which has no way to stop part-way. "
+              + "Segmenting the audio with a VAD model, or splitting long text, gives it "
+              + "somewhere to stop."
+            : "Nothing is running.";
 
     /// <summary>Fetch the selected package's files.</summary>
     public RelayCommand InstallCommand { get; }
@@ -964,6 +983,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _outputSamples = null;
         ResetPlayer();
         _cancel = new CancellationTokenSource();
+        // Whether this run can be stopped at all is decided by its shape, and
+        // the shape is known before any work starts. The ABI has no cancel
+        // entry point, so a run that makes one call into the engine cannot be
+        // interrupted -- and a Cancel button that silently does nothing is
+        // worse than one that is visibly unavailable, because the user waits
+        // instead of switching to a smaller model or another backend.
+        _cancellable = Task == "tts"
+            ? SplitLongText && TextChunker.Split(Text, Math.Max(1, ChunkBudget)).Count > 1
+            : _vadModel is not null;
+        Notify(nameof(CancelHint));
         CancelCommand.RaiseCanExecuteChanged();
         try
         {
@@ -1148,7 +1177,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(OutputSamples));
             Notify(nameof(OutputSummary));
             Notify(nameof(Timing));
-            Status = rows.Count == 0 && transcript.Length == 0 && _outputSamples is null
+            // Cancelled first: a run stopped before its first piece finished
+            // produces nothing, and "the family produced no output for this
+            // input" reads as a model problem rather than as the thing the user
+            // just asked for.
+            Status = _cancel?.IsCancellationRequested == true
+                ? _segmentedSummary.Length > 0
+                    ? $"Cancelled.  {_segmentedSummary}"
+                    : $"Cancelled after {rows.Count} row(s)."
+                : rows.Count == 0 && transcript.Length == 0 && _outputSamples is null
                 ? "Ran, but the family produced no output for this input."
                 : _segmentedSummary.Length > 0
                     ? $"{_segmentedSummary}  Done in {_lastRunSeconds * 1000:F0} ms."
@@ -1161,6 +1198,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         finally
         {
             Busy = false;
+            _cancel?.Dispose();
+            _cancel = null;
+            _cancellable = false;
+            Notify(nameof(CancelHint));
+            CancelCommand.RaiseCanExecuteChanged();
             SaveWavCommand.RaiseCanExecuteChanged();
         }
     }
@@ -1173,11 +1215,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string RunLongText(List<string> pieces, List<ResultRow> rows)
     {
         _segments.Clear();
-        var cancelled = false;
 
         for (var index = 0; index < pieces.Count; index++)
         {
-            if (_cancel?.IsCancellationRequested == true) { cancelled = true; break; }
+            if (_cancel?.IsCancellationRequested == true) break;
 
             var piece = pieces[index];
             using var request = new AudioCppRequest();
@@ -1219,7 +1260,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         var seconds = _segments.Sum(seg => seg.Seconds);
         _segmentedSummary = $"{_segments.Count} of {pieces.Count} piece(s), {seconds:F1}s"
-                          + (cancelled ? ".  Cancelled part-way." : ".");
+                          + ".";
         return string.Join(" ", _segments.Select(seg => seg.Text));
     }
 
@@ -1263,10 +1304,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         var pieces = new List<string>();
-        var cancelled = false;
         foreach (var (start, end) in groups)
         {
-            if (_cancel?.IsCancellationRequested == true) { cancelled = true; break; }
+            if (_cancel?.IsCancellationRequested == true) break;
 
             var window = new float[end - start];
             Array.Copy(clip.Samples, (int)start, window, 0, window.Length);
@@ -1293,8 +1333,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         var speech = groups.Sum(g => (g.End - g.Start)) / (double)rate;
         _segmentedSummary = $"{groups.Count} group(s) from {segments.Count} VAD segment(s), "
-                          + $"{speech:F1}s of speech."
-                          + (cancelled ? "  Cancelled part-way." : "");
+                          + $"{speech:F1}s of speech.";
         return string.Join(" ", pieces);
     }
 
@@ -1417,6 +1456,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Busy = true;
         InstallFraction = 0;
         _cancel = new CancellationTokenSource();
+        // An HTTP download has a cancellation point on every chunk, so unlike a
+        // run this is always interruptible. The Cancel button is shared, and
+        // gating it on the run's shape alone would have disabled it here.
+        _cancellable = true;
+        Notify(nameof(CancelHint));
         CancelCommand.RaiseCanExecuteChanged();
         try
         {
@@ -1464,6 +1508,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             _cancel?.Dispose();
             _cancel = null;
+            _cancellable = false;
+            Notify(nameof(CancelHint));
+            CancelCommand.RaiseCanExecuteChanged();
             InstallFraction = 0;
             Busy = false;
             InstallCommand.RaiseCanExecuteChanged();
@@ -1829,7 +1876,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private Task CancelAsync()
     {
         _cancel?.Cancel();
-        Status = "Cancelling after the current segment…";
+        Status = "Cancelling after the current piece…";
         return System.Threading.Tasks.Task.CompletedTask;
     }
 

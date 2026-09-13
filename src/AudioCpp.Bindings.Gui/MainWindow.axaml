@@ -481,7 +481,7 @@
                                      Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
                                      HorizontalAlignment="Stretch" />
                       <TextBox Grid.Column="2" IsVisible="{Binding IsText}"
-                               Text="{Binding Value}" Watermark="{Binding DefaultDisplay}" />
+                               Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}" />
                     </Grid>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -510,7 +510,7 @@
                                        Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
                                        HorizontalAlignment="Stretch" />
                         <TextBox Grid.Column="2" IsVisible="{Binding IsText}"
-                                 Text="{Binding Value}" Watermark="{Binding DefaultDisplay}" />
+                                 Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}" />
                       </Grid>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
@@ -544,7 +544,9 @@
                     </Border>
                   </StackPanel>
                 </Button>
-                <Button Content="{Binding [common.cancel], Source={x:Static res:Loc.Current}}" Command="{Binding CancelCommand}" />
+                <Button Content="{Binding [common.cancel], Source={x:Static res:Loc.Current}}"
+                        Command="{Binding CancelCommand}"
+                        ToolTip.Tip="{Binding CancelHint}" />
                 <TextBlock Text="{Binding RunState}" Classes="Subtle"
                            VerticalAlignment="Center" />
               </StackPanel>
