@@ -108,6 +108,101 @@
       </StackPanel>
     </ScrollViewer>
 
+    <!-- Server: audio.cpp's HTTP API, served from these bindings. Between
+         Studio and Arena because it is a way of using the same models, not a
+         diagnostic like Runtime. -->
+    <ScrollViewer Padding="20,16" IsVisible="{Binding IsServer}">
+      <StackPanel Spacing="16" DataContext="{Binding Server}">
+        <StackPanel Spacing="4">
+          <TextBlock Text="{Binding [nav.server], Source={x:Static res:Loc.Current},
+                            Converter={x:Static res:Upper.Instance}}"
+                     Classes="Eyebrow" Foreground="{DynamicResource AppAccent}" />
+          <TextBlock Text="{Binding Address}" Classes="Hero" />
+          <TextBlock Classes="Subtle" FontSize="13"
+                     Text="Serve the same models over HTTP, for a client that speaks audio.cpp's API." />
+        </StackPanel>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Text="{Binding [section.state], Source={x:Static res:Loc.Current},
+                              Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Classes="Primary"
+                      Content="{Binding [action.start], Source={x:Static res:Loc.Current}}"
+                      Command="{Binding StartCommand}" />
+              <Button Content="{Binding [action.stop], Source={x:Static res:Loc.Current}}"
+                      Command="{Binding StopCommand}" />
+              <TextBlock Text="{Binding State}" Classes="Label" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding Status}" Classes="Subtle" VerticalAlignment="Center" />
+            </StackPanel>
+            <!-- Read back from /health rather than from the flag beside it: the
+                 two disagree exactly when something is wrong. -->
+            <TextBlock Text="{Binding Health}" Classes="Subtle" FontFamily="monospace" FontSize="11" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Text="{Binding [server.config], Source={x:Static res:Loc.Current},
+                              Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
+            <!-- Fixed widths: host took every spare pixel while the port spinner
+                 clipped its own value to "808". -->
+            <Grid ColumnDefinitions="Auto,8,200,20,Auto,8,130,20,Auto,8,150,20,Auto,8,110,*">
+              <TextBlock Grid.Column="0" Text="host" Classes="Subtle" VerticalAlignment="Center" />
+              <TextBox Grid.Column="2" Text="{Binding Host}" />
+              <TextBlock Grid.Column="4" Text="port" Classes="Subtle" VerticalAlignment="Center" />
+              <NumericUpDown Grid.Column="6" Value="{Binding Port}" Minimum="1" Maximum="65535"
+                             Increment="1" FormatString="0" />
+              <TextBlock Grid.Column="8" Text="backend" Classes="Subtle" VerticalAlignment="Center" />
+              <ComboBox Grid.Column="10" ItemsSource="{Binding Backends}"
+                        SelectedItem="{Binding Backend}" HorizontalAlignment="Stretch" />
+              <TextBlock Grid.Column="12" Text="threads" Classes="Subtle" VerticalAlignment="Center" />
+              <NumericUpDown Grid.Column="14" Value="{Binding Threads}" Minimum="1" Maximum="256"
+                             Increment="1" FormatString="0" />
+            </Grid>
+            <CheckBox IsChecked="{Binding LazyLoad}"
+                      Content="Load each model on its first request" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Text="{Binding [server.models], Source={x:Static res:Loc.Current},
+                              Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <!-- Add and Remove, not Install and Delete: these rows are server
+                   configuration, and nothing is downloaded or erased. -->
+              <Button Content="{Binding [action.add], Source={x:Static res:Loc.Current}}"
+                      Command="{Binding AddModelCommand}" />
+              <Button Content="{Binding [action.remove], Source={x:Static res:Loc.Current}}"
+                      Command="{Binding RemoveModelCommand}" />
+              <TextBlock Classes="Subtle" VerticalAlignment="Center"
+                         Text="The id is what a client names in a request." />
+            </StackPanel>
+            <DataGrid ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}"
+                      Height="180" GridLinesVisibility="Horizontal" CanUserSortColumns="False">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="id"     Binding="{Binding Id}"     Width="140" />
+                <DataGridTextColumn Header="path"   Binding="{Binding Path}"   Width="*" />
+                <DataGridTextColumn Header="family" Binding="{Binding Family}" Width="130" />
+                <DataGridTextColumn Header="task"   Binding="{Binding Task}"   Width="80" />
+                <DataGridTextColumn Header="mode"   Binding="{Binding Mode}"   Width="90" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="8">
+            <TextBlock Text="{Binding [section.events], Source={x:Static res:Loc.Current},
+                              Converter={x:Static res:Upper.Instance}}" Classes="Eyebrow" />
+            <ListBox ItemsSource="{Binding Log}" Height="220" FontFamily="monospace" FontSize="11"
+                     Background="Transparent" BorderThickness="0" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+
     <ScrollViewer Padding="20,16" IsVisible="{Binding IsArena}">
       <StackPanel Spacing="16" DataContext="{Binding Arena}">
         <StackPanel Spacing="4">

@@ -37,6 +37,7 @@
     <ProjectReference Include="../AudioCpp/AudioCpp.csproj" />
     <ProjectReference Include="../AudioCpp.Audio/AudioCpp.Audio.csproj" />
     <ProjectReference Include="../AudioCpp.Packages/AudioCpp.Packages.csproj" />
+    <ProjectReference Include="../AudioCpp.Server/AudioCpp.Server.csproj" />
   </ItemGroup>
 
 </Project>
