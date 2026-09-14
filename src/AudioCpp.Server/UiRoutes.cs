@@ -2,6 +2,7 @@ using System.Text.Json;
 using AudioCpp.Packages;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace AudioCpp.Server;
 
@@ -17,6 +18,20 @@ namespace AudioCpp.Server;
 /// </remarks>
 internal static class UiRoutes
 {
+    /// <summary>Best-effort removal of a file nothing will ever ask for again.</summary>
+    private static void Delete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // Nothing useful to do: the request that would have reported it is
+            // already failing for another reason.
+        }
+    }
+
     public static void Map(WebApplication app, ModelPool pool, InstallJobs jobs,
                            ServerConfig config, Action<string> log)
     {
@@ -271,19 +286,58 @@ internal static class UiRoutes
                 return Routes.Problem(400, "invalid_request_error", "upload filename is not usable");
             }
 
+            // Kestrel's own body limit would otherwise decide this, at a
+            // default far below what a model file needs and with an error that
+            // does not say which limit was hit.
+            var sizeLimit = http.Features.Get<IHttpMaxRequestBodySizeFeature>();
+            if (sizeLimit is { IsReadOnly: false })
+            {
+                sizeLimit.MaxRequestBodySize = ServerLimits.MaxUploadBytes;
+            }
+
             var directory = Path.Combine(jobs.ModelsRoot, "uploads");
             Directory.CreateDirectory(directory);
             var target = Path.Combine(directory, $"{Guid.NewGuid():N}-{name}");
 
-            long written;
-            await using (var file = File.Create(target))
+            long written = 0;
+            var failed = false;
+            try
             {
-                await http.Request.Body.CopyToAsync(file, cancel);
-                written = file.Length;
+                await using var file = File.Create(target);
+                var buffer = new byte[128 * 1024];
+                while (true)
+                {
+                    var read = await http.Request.Body.ReadAsync(buffer, cancel);
+                    if (read == 0) break;
+                    written += read;
+                    if (written > ServerLimits.MaxUploadBytes)
+                    {
+                        failed = true;
+                        break;
+                    }
+                    await file.WriteAsync(buffer.AsMemory(0, read), cancel);
+                }
+            }
+            catch (Exception error) when (error is IOException or OperationCanceledException
+                                          or BadHttpRequestException)
+            {
+                // A client that hangs up mid-upload leaves bytes behind
+                // otherwise, and nothing ever comes back for them: the path was
+                // never reported, so no one knows the file is there to delete.
+                Delete(target);
+                log($"POST /v1/ui/upload  {name}  abandoned after {written} bytes");
+                throw;
+            }
+
+            if (failed)
+            {
+                Delete(target);
+                return Routes.Problem(413, "invalid_request_error",
+                    $"upload exceeds the {ServerLimits.MaxUploadBytes} byte limit");
             }
             if (written == 0)
             {
-                File.Delete(target);
+                Delete(target);
                 return Routes.Problem(400, "invalid_request_error", "upload body is empty");
             }
 

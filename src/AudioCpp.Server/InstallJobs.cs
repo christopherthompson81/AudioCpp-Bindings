@@ -167,6 +167,7 @@ internal sealed class InstallJobs(string modelSpecsDirectory, Action<string> log
             finally
             {
                 job.FinishedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                job.Cancel.Dispose();
             }
         });
 
@@ -203,7 +204,17 @@ internal sealed class InstallJobs(string modelSpecsDirectory, Action<string> log
         {
             job.State = "cancelling";
             job.Message = "Stopping";
-            job.Cancel.Cancel();
+            try
+            {
+                job.Cancel.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The job finished between the state check above and here, and
+                // disposed its own token source. Nothing to cancel, and the
+                // status returned below reports what actually happened -- which
+                // is what the caller asked about.
+            }
         }
         return Status(packageId);
     }

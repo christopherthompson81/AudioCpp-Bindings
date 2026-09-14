@@ -249,6 +249,15 @@ internal static class Ui
             var emptyUpload = await http.PostAsync("/v1/ui/upload", new ByteArrayContent([]));
             Check("an empty upload is a 400", emptyUpload.StatusCode == HttpStatusCode.BadRequest);
 
+            // Nothing rejected may be left behind: the path of a refused upload
+            // is never reported, so a file it left would be one nobody knows to
+            // delete.
+            var uploadsDir = Path.Combine(models.FullName, "uploads");
+            var kept = Directory.Exists(uploadsDir)
+                ? Directory.GetFiles(uploadsDir).Length : 0;
+            Check("a refused upload leaves nothing on disk", kept == 2,
+                  $"{kept} file(s) in uploads, expected the 2 that succeeded");
+
             // 5. Voice preview.
             var preview = await http.GetAsync("/v1/ui/voice-preview?voice=alba");
             Check("voice-preview returns the wav",

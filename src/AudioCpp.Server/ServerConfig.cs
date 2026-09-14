@@ -15,6 +15,16 @@ public static class ServerLimits
     /// than a copy that can drift.
     /// </remarks>
     public const int MaxInlineReferenceBytes = 5 * 1024 * 1024;
+
+    /// <summary>2 GiB, as the reference server caps UI uploads.</summary>
+    /// <remarks>
+    /// Enforced by counting bytes as they are written rather than by trusting
+    /// Content-Length, which a chunked upload does not send at all. Without a
+    /// cap the route writes whatever it is given straight to disk, which on a
+    /// machine whose models folder shares a volume with everything else is a
+    /// way to fill it.
+    /// </remarks>
+    public const long MaxUploadBytes = 2L * 1024 * 1024 * 1024;
 }
 
 /// <summary>
