@@ -43,7 +43,7 @@ tested against, so the engine version is recorded in the tree rather than chosen
 whoever runs the build:
 
 ```bash
-git clone --recurse-submodules https://github.com/christopherthompson81/AudioCpp-Bindings
+git clone https://github.com/christopherthompson81/AudioCpp-Bindings
 cd AudioCpp-Bindings
 ./scripts/build-engine.sh          # add -DGGML_CUDA=ON, or any other cmake flag
 ```
@@ -53,6 +53,12 @@ where the binding looks for it by default — no environment variable, and no se
 checkout to keep in step. To build against your own audio.cpp instead, point
 `AUDIOCPP_NATIVE_DIR` at its `build/bin`; an explicit setting always wins. The pin is
 the version that is tested, not the only one that works.
+
+A plain clone, not `--recurse-submodules`: that recurses into audio.cpp's own
+submodule, whose URL is SSH-only, and the clone aborts for anyone without access
+to it. The C ABI does not need it, so `build-engine.sh` fetches the engine and
+nothing below it. If you have already cloned recursively and seen it fail, the
+engine is checked out regardless and the build script will carry on from there.
 
 Models come from audio.cpp's own model manager:
 
