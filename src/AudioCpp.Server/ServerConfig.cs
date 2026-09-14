@@ -116,6 +116,48 @@ public sealed record ServerConfig
     public string VoiceDir { get; init; } = "";
 
     /// <summary>
+    /// A voice name from the library, resolved to the wav that clones it and
+    /// the transcript that goes with it.
+    /// </summary>
+    /// <remarks>
+    /// <c>voice_dir/prompt_text</c> is a <c>&lt;basename&gt;|&lt;transcript&gt;</c>
+    /// mapping, the same format the web UI uses. The transcript matters as much
+    /// as the audio: a cloning model given a reference clip with no reference
+    /// text either refuses outright or clones from a transcript it guessed.
+    ///
+    /// The name is reduced to a filename and the result checked to be inside
+    /// the library, because it arrives in a request body.
+    /// </remarks>
+    public (string Wav, string Text)? ResolveLibraryVoice(string name)
+    {
+        if (VoiceDir.Length == 0 || name.Length == 0) return null;
+        if (name is "." or ".." || name != Path.GetFileName(name)) return null;
+
+        var root = Path.GetFullPath(VoiceDir);
+        var wav = Path.GetFullPath(Path.Combine(root, name + ".wav"));
+        if (!wav.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || !File.Exists(wav))
+        {
+            return null;
+        }
+
+        var transcript = "";
+        var prompts = Path.Combine(root, "prompt_text");
+        if (File.Exists(prompts))
+        {
+            foreach (var line in File.ReadLines(prompts))
+            {
+                var separator = line.IndexOf('|');
+                if (separator < 0) continue;
+                if (line[..separator].TrimEnd() != name) continue;
+                transcript = line[(separator + 1)..];
+                break;
+            }
+        }
+        return (wav, transcript);
+    }
+
+    /// <summary>
     /// Whether a client may add and remove models at runtime, through
     /// <c>/v1/models/load</c> and <c>/v1/models/unload</c>.
     /// </summary>
@@ -144,6 +186,66 @@ public sealed record ServerConfig
 
     /// <summary>Bounds on the live-ingest routes.</summary>
     public LiveIngestLimits LiveIngest { get; init; } = new();
+
+    /// <summary>Whether the browser UI is served at all.</summary>
+    public bool UiEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Origins allowed to call this API from a browser, or empty for none.
+    /// </summary>
+    /// <remarks>
+    /// Upstream calls this experimental and so is this. <c>*</c> is honoured
+    /// because upstream honours it, and it means any page on the internet the
+    /// user visits can drive this server — which is only safe because the
+    /// default host is loopback. Enabling both a wildcard origin and a
+    /// non-loopback host is the combination to avoid, and nothing here can stop
+    /// someone configuring it.
+    /// </remarks>
+    public string CorsOrigins { get; init; } = "";
+
+    /// <summary>Log each request's body, truncated.</summary>
+    /// <remarks>
+    /// Off by default, and not only for noise: a speech request body carries
+    /// the text being synthesised and may carry a base64 voice reference, so
+    /// turning this on puts user content in the log.
+    /// </remarks>
+    public bool LogRequestBody { get; init; }
+
+    /// <summary>Largest request body accepted, on the routes that buffer one.</summary>
+    public long MaxRequestBodyBytes { get; init; } = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// How long a request waits for a model another request is using before it
+    /// gives up with a 503.
+    /// </summary>
+    /// <remarks>
+    /// A model runs one request at a time. If an inference wedges the device —
+    /// a CUDA call that never returns cannot be cancelled from userspace —
+    /// every later request would wait forever, so past this bound they fail
+    /// fast instead of parking a thread each. Must exceed the slowest
+    /// legitimate single run; music generation takes minutes. 0 restores
+    /// unbounded waiting.
+    /// </remarks>
+    public int BusyTimeoutMs { get; init; } = 300_000;
+
+    /// <summary>
+    /// How many models may be resident at once, or 0 for no limit.
+    /// </summary>
+    /// <remarks>
+    /// Loading one past the limit first unloads the least recently used idle
+    /// model, whose next request reloads it. That is what lets a multi-model
+    /// config run on a device that does not fit all of them at once.
+    /// </remarks>
+    public int MaxLoadedModels { get; init; }
+
+    /// <summary>
+    /// Config keys this implementation does not model, kept verbatim.
+    /// </summary>
+    /// <remarks>
+    /// So that saving a config never silently deletes a field it did not
+    /// understand — see <see cref="ServerConfigFile"/>.
+    /// </remarks>
+    public System.Text.Json.Nodes.JsonObject Extra { get; init; } = [];
 
     public IReadOnlyList<ServerModel> Models { get; init; } = [];
 }

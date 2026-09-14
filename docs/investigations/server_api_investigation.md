@@ -292,3 +292,29 @@ the only variable.
 **Not verified:** `/v1/audio/speech/live` with real audio. It needs an s2s
 model in streaming mode (personaplex), which is not on this machine. Its
 request handling and guards are covered; its audio path is not.
+
+## Run 8 — 2026-09-13 18:15 — a check that passed alone and failed in sequence
+
+The server page now writes a real `server.json` when it starts and restores it
+at construction. `--server-check` passed immediately after that change and
+failed on the next full pass, with four failures and a connection refused.
+
+Nothing had changed in between. The check was reading the config the *previous*
+run of the same check had written: it restored a model row from last time,
+added a second, and then asserted against a page that held two.
+
+Two problems, not one:
+
+- The check was stateful, which the `Models.Clear()` at its start fixes.
+- More seriously, **a check was writing to the real config directory**.
+  `~/.config/audiocpp-studio/server.json` had been created by a check run, so
+  anyone running the checks would find their Server page holding
+  `/models/not-loaded-because-lazy.gguf` afterwards. Removed, and every
+  `--*-check` now runs with `XDG_CONFIG_HOME` pointed at a scratch directory,
+  set before Avalonia builds anything because the view model restores that
+  config in its constructor.
+
+The settings check already did this for itself; the pattern was there and the
+new code did not follow it. Worth noting that the failure only appeared because
+the checks were run twice in a row — a single run is not enough to catch a
+check that pollutes its own inputs.

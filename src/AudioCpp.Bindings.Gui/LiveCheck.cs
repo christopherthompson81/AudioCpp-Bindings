@@ -946,6 +946,10 @@ internal static class LiveCheck
                 }
 
                 var server = viewModel.Server;
+                // From a known state rather than whatever a previous run left:
+                // the page restores its last configuration now, and a check
+                // that inherits it is testing the previous run.
+                server.Models.Clear();
                 server.Port = 18500 + Random.Shared.Next(300);
                 server.AddModelCommand.Execute(null);
                 await Task.Delay(100);
@@ -967,6 +971,26 @@ internal static class LiveCheck
                 await Task.Delay(500);
                 Console.WriteLine($"  state {server.State} at {server.Address}");
                 Expect("the page starts it", server.IsRunning, server.Status);
+
+                // The configuration is written as a real server.json, so the
+                // same file can be handed to audio.cpp's server. A private
+                // settings blob would survive a restart just as well and be
+                // useless for that.
+                Expect("starting writes a server.json", File.Exists(ServerPage.ConfigPath),
+                       ServerPage.ConfigPath);
+                if (File.Exists(ServerPage.ConfigPath))
+                {
+                    var restored = new ServerPage();
+                    restored.Restore();
+                    Expect("which restores the port and the models",
+                           restored.Port == server.Port
+                           && restored.Models.Count == server.Models.Count,
+                           $"port {restored.Port}, {restored.Models.Count} model(s)");
+                    Expect("and the model rows come back with their ids",
+                           restored.Models.Count > 0
+                           && restored.Models[0].Id == server.Models[0].Id,
+                           restored.Models.Count > 0 ? restored.Models[0].Id : "(none)");
+                }
 
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
                 var health = await client.GetStringAsync($"{server.Address}/health");

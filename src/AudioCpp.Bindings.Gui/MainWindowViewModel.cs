@@ -583,7 +583,22 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         [new("Studio", ""), new("Server", ""), new("Arena", ""), new("Runtime", "")];
 
     /// <summary>The HTTP server this app can run, and the page that drives it.</summary>
-    public ServerPage Server { get; } = new();
+    public ServerPage Server { get; } = Restored();
+
+    /// <summary>
+    /// The server page with last session's configuration already in it.
+    /// </summary>
+    /// <remarks>
+    /// Restored at construction rather than when the page is first shown: the
+    /// page is a tab, and a user who set it up and restarted expects to find it
+    /// as they left it whether or not they click there first.
+    /// </remarks>
+    private static ServerPage Restored()
+    {
+        var page = new ServerPage();
+        page.Restore();
+        return page;
+    }
 
     public Choice? SelectedPage
     {

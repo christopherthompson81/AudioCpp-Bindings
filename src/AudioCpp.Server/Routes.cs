@@ -676,7 +676,7 @@ internal static class Routes
                 }
                 try
                 {
-                    await Streaming.SpeechAsync(http, pool, request, log, http.RequestAborted);
+                    await Streaming.SpeechAsync(http, pool, request, config, log, http.RequestAborted);
                     return Results.Empty;
                 }
                 catch (AudioCppException error) when (!http.Response.HasStarted)
@@ -692,7 +692,7 @@ internal static class Routes
                 var audio = await pool.UseAsync(request.Model, session =>
                 {
                     using var task = new AudioCppRequest();
-                    request.ApplyTo(task);
+                    request.ApplyTo(task, config);
 
                     using var result = session.Run(task);
                     return result.Audio is { } output
