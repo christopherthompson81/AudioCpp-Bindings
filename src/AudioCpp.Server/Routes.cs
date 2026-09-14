@@ -616,9 +616,15 @@ internal static class Routes
     {
         UiRoutes.Map(app, pool, jobs, config, log);
 
+        // Deliberately unlogged. The Server page polls this every two seconds to
+        // show liveness, and the page keeps the last 500 lines: logging each
+        // poll fills the whole visible log with "GET /health" in about
+        // seventeen minutes, so the model load, the request that failed, and
+        // everything else worth reading has scrolled out by the time anyone
+        // looks. A health check that answers is not an event -- the answer is
+        // already on screen beside the log.
         app.MapGet("/health", () =>
         {
-            log("GET /health");
             return Results.Json(new
             {
                 status = "ok",
