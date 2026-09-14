@@ -206,5 +206,16 @@ else
                       + "skipping alignment");
 }
 
+var modelSpecs = Environment.GetEnvironmentVariable("AUDIOCPP_MODEL_SPECS") ?? "";
+if (Directory.Exists(modelSpecs))
+{
+    Console.WriteLine();
+    failures += await AudioCpp.ServerTest.Ui.RunAsync(modelSpecs);
+}
+else
+{
+    Console.WriteLine("no AUDIOCPP_MODEL_SPECS; skipping the ui routes");
+}
+
 Console.WriteLine(failures == 0 ? "server OK" : $"server: {failures} failure(s)");
 return failures == 0 ? 0 : 1;

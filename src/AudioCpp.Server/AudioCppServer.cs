@@ -23,6 +23,7 @@ public enum ServerState { Stopped, Starting, Running, Stopping, Failed }
 public sealed class AudioCppServer : IAsyncDisposable
 {
     private WebApplication? _app;
+    private InstallJobs? _jobs;
     private ModelPool? _pool;
     private readonly List<string> _log = [];
     private readonly Lock _logGate = new();
@@ -80,7 +81,11 @@ public sealed class AudioCppServer : IAsyncDisposable
                 kestrel.Listen(System.Net.IPAddress.Parse(config.Host), config.Port));
             var app = builder.Build();
 
-            Routes.Map(app, _pool, Write);
+            _jobs = new InstallJobs(config.ModelSpecsDirectory, Write)
+            {
+                ModelsRoot = config.ModelsRoot,
+            };
+            Routes.Map(app, _pool, _jobs, config, Write);
 
             await app.StartAsync(cancel);
             _app = app;

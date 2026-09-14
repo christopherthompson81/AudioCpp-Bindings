@@ -15,6 +15,16 @@ public static class ServerLimits
     /// than a copy that can drift.
     /// </remarks>
     public const int MaxInlineReferenceBytes = 5 * 1024 * 1024;
+
+    /// <summary>2 GiB, as the reference server caps UI uploads.</summary>
+    /// <remarks>
+    /// Enforced by counting bytes as they are written rather than by trusting
+    /// Content-Length, which a chunked upload does not send at all. Without a
+    /// cap the route writes whatever it is given straight to disk, which on a
+    /// machine whose models folder shares a volume with everything else is a
+    /// way to fill it.
+    /// </remarks>
+    public const long MaxUploadBytes = 2L * 1024 * 1024 * 1024;
 }
 
 /// <summary>
@@ -118,6 +128,19 @@ public sealed record ServerConfig
     /// could never serve anything.
     /// </remarks>
     public bool UiManagement { get; init; }
+
+    /// <summary>
+    /// Where packages are installed, and where the UI routes browse from.
+    /// </summary>
+    /// <remarks>
+    /// Also the "default" the models-root route reports and resets to, so a
+    /// client that has moved the folder can get back without knowing what it
+    /// started as.
+    /// </remarks>
+    public string ModelsRoot { get; init; } = "";
+
+    /// <summary>Directory of model_specs/*.json describing installable packages.</summary>
+    public string ModelSpecsDirectory { get; init; } = "";
 
     /// <summary>Bounds on the live-ingest routes.</summary>
     public LiveIngestLimits LiveIngest { get; init; } = new();
