@@ -607,12 +607,15 @@ internal static class Routes
     /// <summary>
     /// An error in OpenAI's shape, which is what clients of this API parse.
     /// </summary>
-    private static IResult Problem(int status, string type, string message) =>
+    internal static IResult Problem(int status, string type, string message) =>
         Results.Json(new { error = new { message, type } }, statusCode: status);
 
 
-    public static void Map(WebApplication app, ModelPool pool, Action<string> log)
+    public static void Map(WebApplication app, ModelPool pool, InstallJobs jobs,
+                           ServerConfig config, Action<string> log)
     {
+        UiRoutes.Map(app, pool, jobs, config, log);
+
         app.MapGet("/health", () =>
         {
             log("GET /health");

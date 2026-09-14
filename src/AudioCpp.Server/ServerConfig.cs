@@ -119,6 +119,19 @@ public sealed record ServerConfig
     /// </remarks>
     public bool UiManagement { get; init; }
 
+    /// <summary>
+    /// Where packages are installed, and where the UI routes browse from.
+    /// </summary>
+    /// <remarks>
+    /// Also the "default" the models-root route reports and resets to, so a
+    /// client that has moved the folder can get back without knowing what it
+    /// started as.
+    /// </remarks>
+    public string ModelsRoot { get; init; } = "";
+
+    /// <summary>Directory of model_specs/*.json describing installable packages.</summary>
+    public string ModelSpecsDirectory { get; init; } = "";
+
     /// <summary>Bounds on the live-ingest routes.</summary>
     public LiveIngestLimits LiveIngest { get; init; } = new();
 
