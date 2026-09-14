@@ -24,7 +24,7 @@ if [ ! -f "$ENGINE/CMakeLists.txt" ]; then
     if ! git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
         echo "this is not a git clone, so the pinned engine cannot be fetched."
         echo "clone the repository instead:"
-        echo "  git clone --recurse-submodules https://github.com/christopherthompson81/AudioCpp-Bindings"
+        echo "  git clone https://github.com/christopherthompson81/AudioCpp-Bindings"
         exit 1
     fi
     echo "engine submodule is not checked out; fetching it."

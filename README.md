@@ -43,10 +43,16 @@ tested against, so the engine version is recorded in the tree rather than chosen
 whoever runs the build:
 
 ```bash
-git clone --recurse-submodules https://github.com/christopherthompson81/AudioCpp-Bindings
+git clone https://github.com/christopherthompson81/AudioCpp-Bindings
 cd AudioCpp-Bindings
 ./scripts/build-engine.sh          # add -DGGML_CUDA=ON, or any other cmake flag
 ```
+
+A plain clone, not `--recurse-submodules`: that recurses into audio.cpp's own
+submodule, whose URL is SSH-only, and the clone aborts for anyone without access
+to it. The C ABI does not need it, so `build-engine.sh` fetches the engine and
+nothing below it. If you have already cloned recursively and seen it fail, the
+engine is checked out regardless and the build script will carry on from there.
 
 That builds `libaudiocpp` with the C ABI enabled into `external/audio.cpp/build/bin`,
 where the binding looks for it by default — no environment variable, and no second
