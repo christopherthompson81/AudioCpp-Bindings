@@ -43,6 +43,28 @@ cmake -S "$ENGINE" -B "$BUILD" \
     -DCMAKE_BUILD_TYPE=Release \
     -DAUDIOCPP_BUILD_C_API=ON \
     "$@"
+
+# -DGGML_CUDA=ON only seeds the default of the engine's own ENGINE_ENABLE_CUDA,
+# which option() ignores once a cache exists -- so it works on a fresh configure
+# and quietly does nothing on a rebuild, leaving a CPU-only library that fails
+# much later with "CUDA backend requested but it is not registered in this build".
+# Say so here, where the flag was actually given.
+cuda="$(sed -n 's/^ENGINE_ENABLE_CUDA:BOOL=//p' "$BUILD/CMakeCache.txt" 2>/dev/null)"
+for argument in "$@"; do
+    case "$argument" in
+        -DGGML_CUDA=[Oo][Nn]|-DGGML_CUDA=1|-DGGML_CUDA:BOOL=[Oo][Nn])
+            if [ "$cuda" != "ON" ]; then
+                echo
+                echo "warning: -DGGML_CUDA=ON did not take. This build has no CUDA."
+                echo "         Use -DENGINE_ENABLE_CUDA=ON instead, which is the"
+                echo "         option the engine actually reads."
+                echo
+            fi
+            ;;
+    esac
+done
+echo "backends: CUDA=${cuda:-OFF}"
+
 cmake --build "$BUILD" \
     --target audiocpp audiocpp_c_api_path_test audiocpp_c_api_model_test \
     --parallel "$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) )"

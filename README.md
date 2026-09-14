@@ -45,7 +45,7 @@ whoever runs the build:
 ```bash
 git clone https://github.com/christopherthompson81/AudioCpp-Bindings
 cd AudioCpp-Bindings
-./scripts/build-engine.sh          # add -DGGML_CUDA=ON, or any other cmake flag
+./scripts/build-engine.sh          # add -DENGINE_ENABLE_CUDA=ON, or any other cmake flag
 ```
 
 That builds `libaudiocpp` with the C ABI enabled into `external/audio.cpp/build/bin`,
@@ -53,6 +53,15 @@ where the binding looks for it by default — no environment variable, and no se
 checkout to keep in step. To build against your own audio.cpp instead, point
 `AUDIOCPP_NATIVE_DIR` at its `build/bin`; an explicit setting always wins. The pin is
 the version that is tested, not the only one that works.
+
+The build is CPU-only unless a backend is asked for. Use audio.cpp's own
+`ENGINE_ENABLE_CUDA`, not ggml's `GGML_CUDA`: the engine *forces* `GGML_CUDA` from
+`ENGINE_ENABLE_CUDA`, and `GGML_CUDA` only seeds that option's default, which
+`option()` ignores once the cache exists. So `-DGGML_CUDA=ON` works on a fresh
+configure and silently does nothing on a rebuild — cmake reports success, ninja
+finds no work, and the library stays CPU-only. The app then fails at run time with
+"CUDA backend requested but it is not registered in this build", which names
+neither the flag nor the build.
 
 A plain clone, not `--recurse-submodules`: that recurses into audio.cpp's own
 submodule, whose URL is SSH-only, and the clone aborts for anyone without access
