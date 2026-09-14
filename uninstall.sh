@@ -69,7 +69,12 @@ if [[ $removed -eq 1 ]]; then
     update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
     gtk-update-icon-cache "$ICON_DIR" 2>/dev/null || true
     echo "Done."
-    [[ $PURGE -eq 0 && -d "$CONFIG" ]] && echo "Settings kept at $CONFIG (--purge removes them)."
+    # An if, not "[[ ... ]] && echo": as the last command in the script, a false
+    # test makes the AND-list's non-zero status the script's exit status, so a
+    # successful uninstall reports failure.
+    if [[ $PURGE -eq 0 && -d "$CONFIG" ]]; then
+        echo "Settings kept at $CONFIG (--purge removes them)."
+    fi
 else
     echo "Nothing to uninstall at $PREFIX"
 fi
