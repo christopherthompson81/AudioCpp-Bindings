@@ -255,6 +255,10 @@ internal static class Program
         {
             foreach (var candidate in new[]
                      {
+                         // The pinned engine first: the catalogue should be checked
+                         // against the specs this repository is built against, not
+                         // whichever audio.cpp checkout happens to sit nearby.
+                         Path.Combine(dir.FullName, "external", "audio.cpp", "model_specs"),
                          Path.Combine(dir.FullName, "audio.cpp", "model_specs"),
                          dir.Parent is null ? null
                              : Path.Combine(dir.Parent.FullName, "audio.cpp", "model_specs"),

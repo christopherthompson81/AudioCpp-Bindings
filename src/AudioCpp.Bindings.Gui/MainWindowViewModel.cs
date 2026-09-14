@@ -2090,6 +2090,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
+            // The pinned engine submodule first: it is the copy this build is
+            // tested against, and it is present in any checkout of this repository.
+            roots.Add(Path.Combine(dir.FullName, "external", "audio.cpp", "model_specs"));
             roots.Add(Path.Combine(dir.FullName, "audio.cpp", "model_specs"));
             if (dir.Parent is not null)
                 roots.Add(Path.Combine(dir.Parent.FullName, "audio.cpp", "model_specs"));
@@ -2752,9 +2755,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private static string Describe(Exception exception) => exception switch
     {
         AudioCppException native => $"{native.Operation} failed: {native.Detail} [{native.Status}]",
-        DllNotFoundException => "libaudiocpp was not found. Set AUDIOCPP_NATIVE_DIR to the "
-                               + "directory holding it (an audio.cpp build's bin/), or copy it "
-                               + "beside this executable, then restart.",
+        DllNotFoundException => "libaudiocpp was not found. Build the pinned engine with "
+                               + "./scripts/build-engine.sh, or set AUDIOCPP_NATIVE_DIR to the "
+                               + "bin/ of your own audio.cpp build, then restart.",
         _ => $"{exception.GetType().Name}: {exception.Message}",
     };
 
@@ -2874,12 +2877,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             roots.Add(dir.FullName);
         }
 
-        // Also look for a sibling audio.cpp checkout, as the native library
-        // lookup does. Without this the app starts fine without any environment
-        // set but quietly falls back to fixed chunking, which is worse: the
-        // difference is a silent 111 words on a 10-minute clip, not an error.
+        // Then the pinned engine submodule, and a sibling audio.cpp checkout for
+        // anyone building against their own. Without this the app starts fine
+        // without any environment set but quietly falls back to fixed chunking,
+        // which is worse: the difference is a silent 111 words on a 10-minute
+        // clip, not an error.
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
+            roots.Add(Path.Combine(dir.FullName, "external", "audio.cpp"));
             roots.Add(Path.Combine(dir.FullName, "audio.cpp"));
         }
 

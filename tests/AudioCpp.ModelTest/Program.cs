@@ -98,7 +98,7 @@ internal static class Program
         }
         catch (DllNotFoundException exception)
         {
-            Console.WriteLine($"libaudiocpp not found ({exception.Message}); set AUDIOCPP_NATIVE_DIR. Skipping.");
+            Console.WriteLine($"libaudiocpp not found ({exception.Message}); run ./scripts/build-engine.sh. Skipping.");
             return CTestSkip;
         }
 

@@ -107,7 +107,7 @@ internal static class Program
     /// <summary>
     /// An explicit path wins, then AUDIOCPP_HEADER, then the include directory
     /// beside a native build (AUDIOCPP_NATIVE_DIR points into build/bin), then
-    /// an audio.cpp checkout next to this repo.
+    /// the pinned engine submodule, then an audio.cpp checkout next to this repo.
     /// </summary>
     private static string? ResolveHeader(string[] args)
     {
@@ -140,6 +140,11 @@ internal static class Program
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory);
              dir is not null; dir = dir.Parent)
         {
+            // The pinned engine first: coverage should be measured against the
+            // header of the ABI this repository is actually built against, not
+            // whichever audio.cpp checkout happens to sit nearby.
+            candidates.Add(Path.Combine(
+                dir.FullName, "external", "audio.cpp", "include", "audiocpp.h"));
             candidates.Add(Path.Combine(dir.FullName, "audio.cpp", "include", "audiocpp.h"));
             if (dir.Parent is not null)
             {
