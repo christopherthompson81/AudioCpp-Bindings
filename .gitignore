@@ -4,6 +4,11 @@ obj/
 .vs/
 .idea/
 
+# The app's own config directory. It belongs under the user's XDG config root
+# (AppData.Root), not in a checkout -- but a run started from this directory
+# before that helper existed wrote it here, and a `git add` swept it in.
+audiocpp-studio/
+
 # No audio or reference transcripts are tracked. The recordings these harnesses were
 # developed against come from a licensed corpus; transcripts of it are derivative.
 *.wav
