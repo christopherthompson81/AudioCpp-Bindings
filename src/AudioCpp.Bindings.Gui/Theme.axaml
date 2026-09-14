@@ -3,7 +3,8 @@
   look like the same product. Both variants are defined here rather than only
   the dark one, so switching theme is a variant change and not a restyle.
 
-  Names follow the CSS custom properties they came from.
+  Names follow the CSS custom properties they came from; AppMark is the one
+  exception, named for the .brand .mark rule whose gradient it reproduces.
 -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
@@ -25,6 +26,10 @@
       <SolidColorBrush x:Key="AppMuted" Color="#8ca3c3" />
       <SolidColorBrush x:Key="AppAccent" Color="#42e8d5" />
       <SolidColorBrush x:Key="AppBlue" Color="#6aa8ff" />
+      <LinearGradientBrush x:Key="AppMark" StartPoint="0%,0%" EndPoint="100%,100%">
+        <GradientStop Offset="0" Color="#42e8d5" />
+        <GradientStop Offset="1" Color="#6aa8ff" />
+      </LinearGradientBrush>
       <SolidColorBrush x:Key="AppDanger" Color="#ff778b" />
       <SolidColorBrush x:Key="AppButton" Color="#14243b" />
       <SolidColorBrush x:Key="AppButtonHover" Color="#1a304e" />
@@ -53,6 +58,10 @@
       <SolidColorBrush x:Key="AppMuted" Color="#5e7189" />
       <SolidColorBrush x:Key="AppAccent" Color="#087f7a" />
       <SolidColorBrush x:Key="AppBlue" Color="#256fc9" />
+      <LinearGradientBrush x:Key="AppMark" StartPoint="0%,0%" EndPoint="100%,100%">
+        <GradientStop Offset="0" Color="#087f7a" />
+        <GradientStop Offset="1" Color="#256fc9" />
+      </LinearGradientBrush>
       <SolidColorBrush x:Key="AppDanger" Color="#c43853" />
       <SolidColorBrush x:Key="AppButton" Color="#edf3fa" />
       <SolidColorBrush x:Key="AppButtonHover" Color="#dfeaf6" />
