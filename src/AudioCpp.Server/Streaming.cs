@@ -50,7 +50,8 @@ internal static class Streaming
     }
 
     public static async Task SpeechAsync(HttpContext http, ModelPool pool, SpeechRequest request,
-                                         Action<string> log, CancellationToken cancel)
+                                         ServerConfig config, Action<string> log,
+                                         CancellationToken cancel)
     {
         var raw = request.StreamFormat == "audio";
         var started = Stopwatch.StartNew();
@@ -71,7 +72,7 @@ internal static class Streaming
         await pool.UseStreamingAsync(request.Model, async session =>
         {
             using var task = new AudioCppRequest();
-            request.ApplyTo(task);
+            request.ApplyTo(task, config);
             session.StartStream(task);
 
             sse = raw ? null : Sse.Begin(http.Response);

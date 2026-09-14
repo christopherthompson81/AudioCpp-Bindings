@@ -201,7 +201,93 @@ internal static class Management
 
         await server.StopAsync();
 
-        // 6. The management routes are off unless the config turns them on,
+        // 6. Residency and concurrency bounds, which only mean anything with a
+        // real model behind them.
+        {
+            var bounded = new ServerConfig
+            {
+                Port = config.Port + 71,
+                Backend = backend,
+                // One resident model, two configured: loading the second must
+                // evict the first rather than hold both.
+                MaxLoadedModels = 1,
+                Models =
+                [
+                    new ServerModel("first", family, model, "asr"),
+                    new ServerModel("second", family, model, "asr"),
+                ],
+            };
+            await using var limited = new AudioCppServer();
+            await limited.StartAsync(bounded);
+            using var limitedClient = new HttpClient
+            {
+                BaseAddress = new Uri(limited.Address),
+                Timeout = TimeSpan.FromMinutes(5),
+            };
+
+            async Task<HttpStatusCode> RunOn(string id) =>
+                (await limitedClient.PostAsync("/v1/tasks/run",
+                    new StringContent(
+                        JsonSerializer.Serialize(new { model = id, request = new { audio } }),
+                        Encoding.UTF8, "application/json"))).StatusCode;
+
+            Check("the first model runs", await RunOn("first") == HttpStatusCode.OK);
+            Check("the second model runs", await RunOn("second") == HttpStatusCode.OK);
+            Check("and loading it evicted the first, to stay within the limit",
+                  limited.Log.Any(line => line.Contains("evicted first", StringComparison.Ordinal)),
+                  string.Join(" | ", limited.Log.TakeLast(4)));
+            Check("the evicted model still answers, by reloading",
+                  await RunOn("first") == HttpStatusCode.OK);
+
+            await limited.StopAsync();
+        }
+
+        {
+            // A model serves one request at a time. With the wait set to
+            // nothing, a second concurrent request must fail fast with 503
+            // rather than queue behind the first -- which is the whole point of
+            // the bound: an inference that wedges the device cannot be
+            // cancelled, and without this every later request inherits the hang.
+            var impatient = new ServerConfig
+            {
+                Port = config.Port + 91,
+                Backend = backend,
+                BusyTimeoutMs = 1,
+                Models = [new ServerModel("asr", family, model, "asr")],
+            };
+            await using var busy = new AudioCppServer();
+            await busy.StartAsync(impatient);
+            using var busyClient = new HttpClient
+            {
+                BaseAddress = new Uri(busy.Address),
+                Timeout = TimeSpan.FromMinutes(5),
+            };
+
+            // Loaded first, so the race being measured is the model lock rather
+            // than the load.
+            await busyClient.PostAsync("/v1/tasks/run",
+                new StringContent(JsonSerializer.Serialize(new { model = "asr", request = new { audio } }),
+                                  Encoding.UTF8, "application/json"));
+
+            var together = await Task.WhenAll(Enumerable.Range(0, 4).Select(async _ =>
+                (await busyClient.PostAsync("/v1/tasks/run",
+                    new StringContent(
+                        JsonSerializer.Serialize(new { model = "asr", request = new { audio } }),
+                        Encoding.UTF8, "application/json"))).StatusCode));
+
+            Check("one of several concurrent requests succeeds",
+                  together.Any(status => status == HttpStatusCode.OK),
+                  string.Join(", ", together.Select(s => (int)s)));
+            Check("and the ones that had to wait are 503, not 500",
+                  together.All(status => status is HttpStatusCode.OK
+                                                or HttpStatusCode.ServiceUnavailable)
+                  && together.Any(status => status == HttpStatusCode.ServiceUnavailable),
+                  string.Join(", ", together.Select(s => (int)s)));
+
+            await busy.StopAsync();
+        }
+
+        // 7. The management routes are off unless the config turns them on,
         // because they name a path for the server to open.
         var closed = new ServerConfig
         {

@@ -15,6 +15,22 @@ internal static class Program
             return Smoke.RunAsync(args.Skip(1).ToArray()).GetAwaiter().GetResult();
         }
 
+        // Every --*-check runs against a scratch config directory. The server
+        // page writes a real server.json when it starts, so without this a
+        // check would overwrite the config of whoever ran it -- and would then
+        // inherit whatever the last check left behind, which is how a check
+        // that passed on its own started failing in sequence.
+        //
+        // Set before Avalonia builds anything, because the view model restores
+        // that config in its constructor.
+        if (args.Any(argument => argument.EndsWith("-check", StringComparison.Ordinal)))
+        {
+            var scratch = Path.Combine(Path.GetTempPath(), $"audiocpp-check-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(scratch);
+            Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", scratch);
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", scratch);
+        }
+
         // Settings round-trip, in a scratch directory so a check never writes
         // over the settings of the person running it.
         if (args.Contains("--settings-check"))

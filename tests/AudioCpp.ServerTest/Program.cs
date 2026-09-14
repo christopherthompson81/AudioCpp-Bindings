@@ -206,6 +206,9 @@ else
                       + "skipping alignment");
 }
 
+Console.WriteLine();
+failures += await AudioCpp.ServerTest.Configuration.RunAsync();
+
 var modelSpecs = Environment.GetEnvironmentVariable("AUDIOCPP_MODEL_SPECS") ?? "";
 if (Directory.Exists(modelSpecs))
 {

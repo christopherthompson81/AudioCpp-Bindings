@@ -174,10 +174,28 @@ internal sealed record SpeechRequest
     /// second copy of this is how a voice reference ends up honoured by one and
     /// ignored by the other.
     /// </remarks>
-    public void ApplyTo(AudioCpp.AudioCppRequest task)
+    public void ApplyTo(AudioCpp.AudioCppRequest task, ServerConfig? config = null)
     {
         task.SetText(Input, Language.Length > 0 ? Language : null);
-        if (Voice.Length > 0) task.SetVoiceId(Voice);
+
+        // A voice name is a model preset first and a library file second, which
+        // is the order upstream resolves them in: a model that ships a voice
+        // called "alba" must keep answering with its own, not with whatever wav
+        // happens to share the name on this server.
+        var library = VoiceReference is null
+            ? config?.ResolveLibraryVoice(Voice)
+            : null;
+        if (library is { } voice)
+        {
+            var clip = Wav.Read(voice.Wav);
+            task.SetVoiceAudio(clip.Samples, clip.SampleRate, clip.Channels);
+            if (voice.Text.Length > 0) task.SetOption("reference_text", voice.Text);
+        }
+        else if (Voice.Length > 0)
+        {
+            task.SetVoiceId(Voice);
+        }
+
         if (VoiceReference is { } reference)
         {
             task.SetVoiceAudio(reference.Samples, reference.SampleRate, reference.Channels);

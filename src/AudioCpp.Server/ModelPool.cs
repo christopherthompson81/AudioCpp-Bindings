@@ -29,6 +29,9 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
         public SemaphoreSlim Gate { get; } = new(1, 1);
         public AudioCppModel? Model { get; set; }
         public AudioCppSession? Session { get; set; }
+
+        /// <summary>When this model was last handed to a request, for eviction order.</summary>
+        public long UsedAtTicks;
     }
 
     // The configured models, which /v1/models/load can add to and change at
@@ -49,6 +52,60 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
 
     /// <summary>Bounds the live routes hold their connections to.</summary>
     public LiveIngestLimits LiveIngest => config.LiveIngest;
+
+    /// <summary>
+    /// Unloads least-recently-used models until loading one more stays within
+    /// <see cref="ServerConfig.MaxLoadedModels"/>.
+    /// </summary>
+    /// <remarks>
+    /// Only idle models are candidates: a model whose gate is held is running a
+    /// request, and evicting it would free memory by breaking work already in
+    /// flight. If every other model is busy, the load proceeds over the limit
+    /// rather than failing — the limit is there to bound memory, and refusing a
+    /// request because other requests are in progress would turn it into a
+    /// concurrency cap nobody configured.
+    /// </remarks>
+    private async Task MakeRoomAsync(string loading, CancellationToken cancel)
+    {
+        if (config.MaxLoadedModels <= 0) return;
+
+        while (true)
+        {
+            // Weights, not sessions: a model whose CreateSession threw still
+            // holds its weights, and counting only sessions would let those
+            // hide from the limit entirely.
+            var resident = _entries
+                .Where(pair => pair.Key != loading && pair.Value.Model is not null)
+                .ToArray();
+            if (resident.Length + 1 <= config.MaxLoadedModels) return;
+
+            var evicted = false;
+            foreach (var pair in resident.OrderBy(pair => pair.Value.UsedAtTicks))
+            {
+                // Non-blocking: a model that is busy is skipped rather than
+                // waited for, since waiting here would hold up the request that
+                // is trying to load.
+                if (!await pair.Value.Gate.WaitAsync(0, cancel)) continue;
+                try
+                {
+                    if (pair.Value.Model is null) continue;
+                    pair.Value.Session?.Dispose();
+                    pair.Value.Session = null;
+                    pair.Value.Model.Dispose();
+                    pair.Value.Model = null;
+                    log($"evicted {pair.Key} to stay within max_loaded_models "
+                        + $"({config.MaxLoadedModels})");
+                    evicted = true;
+                }
+                finally
+                {
+                    pair.Value.Gate.Release();
+                }
+                break;
+            }
+            if (!evicted) return;
+        }
+    }
 
     /// <summary>
     /// Adds a model, or reconfigures one already registered under that id.
@@ -259,10 +316,6 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
     }
 
     /// <summary>
-    /// Run something with the model itself as well as its session, for a route
-    /// that has to ask the model about its own contract.
-    /// </summary>
-    /// <summary>
     /// Run something against a model's session, with the model loaded if it is
     /// not already and nothing else using it.
     /// </summary>
@@ -292,12 +345,28 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
         var spec = Spec(id) ?? throw new KeyNotFoundException($"no model with id '{id}'");
         var entry = _entries.GetOrAdd(id, _ => new Entry(spec));
 
-        await entry.Gate.WaitAsync(cancel);
+        // A model serves one request at a time, so a queue forms behind a slow
+        // one. Past the bound a waiter gives up rather than parking a thread
+        // forever: an inference that wedges the device cannot be cancelled from
+        // userspace, and without this every later request inherits that hang.
+        if (!await entry.Gate.WaitAsync(
+                config.BusyTimeoutMs > 0 ? config.BusyTimeoutMs : Timeout.Infinite, cancel))
+        {
+            throw new ServerBusyException(
+                $"model '{id}' was busy for longer than busy_timeout_ms "
+                + $"({config.BusyTimeoutMs} ms)");
+        }
         try
         {
             if (entry.Session is null)
             {
                 var started = DateTime.UtcNow;
+                // Room made before the weights are read, not between them and
+                // the session. The weights are the memory; loading them first
+                // and evicting afterwards means every model the limit allows
+                // plus this one are resident at once, which is the moment the
+                // limit exists to prevent.
+                if (entry.Model is null) await MakeRoomAsync(id, cancel);
                 // spec, not entry.Spec: a reconfigured id keeps its entry (and
                 // its gate, which callers may be queued on) while the
                 // description it loads from changes underneath.
@@ -309,6 +378,7 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
                 log($"loaded {id} ({entry.Model.Family}) in "
                     + $"{(DateTime.UtcNow - started).TotalMilliseconds:F0} ms");
             }
+            entry.UsedAtTicks = DateTime.UtcNow.Ticks;
             return await work(entry.Session);
         }
         finally

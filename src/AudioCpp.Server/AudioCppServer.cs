@@ -79,7 +79,94 @@ public sealed class AudioCppServer : IAsyncDisposable
             // loopback-only rather than a hostname that might resolve outward.
             builder.WebHost.ConfigureKestrel(kestrel =>
                 kestrel.Listen(System.Net.IPAddress.Parse(config.Host), config.Port));
+            builder.WebHost.ConfigureKestrel(kestrel =>
+                kestrel.Limits.MaxRequestBodySize = config.MaxRequestBodyBytes);
             var app = builder.Build();
+
+            // One place to turn a busy model into the status that says so.
+            // Every route can raise it -- it comes from the pool, not from any
+            // one handler -- so catching it per route would be the same four
+            // lines a dozen times, and the one that was forgotten would answer
+            // 500 for a condition that is not an error.
+            app.Use(async (context, next) =>
+            {
+                try
+                {
+                    await next();
+                }
+                catch (ServerBusyException busy) when (!context.Response.HasStarted)
+                {
+                    Write($"busy: {busy.Message}");
+                    context.Response.StatusCode = 503;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(
+                        System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            error = new { message = busy.Message, type = "server_busy" },
+                        }));
+                }
+            });
+
+            // Before the routes, so it applies to every one of them including
+            // the ones that answer errors. A CORS header attached only to
+            // successes tells a browser nothing about why a request failed.
+            if (config.CorsOrigins.Length > 0)
+            {
+                app.Use(async (context, next) =>
+                {
+                    var origin = context.Request.Headers.Origin.ToString();
+                    var allowed = config.CorsOrigins == "*"
+                        ? (origin.Length > 0 ? origin : "*")
+                        : config.CorsOrigins
+                            .Split(',', StringSplitOptions.RemoveEmptyEntries
+                                        | StringSplitOptions.TrimEntries)
+                            .FirstOrDefault(candidate =>
+                                string.Equals(candidate, origin, StringComparison.OrdinalIgnoreCase));
+
+                    if (allowed is { Length: > 0 })
+                    {
+                        context.Response.Headers.AccessControlAllowOrigin = allowed;
+                        // Echoing a specific origin makes the response vary by
+                        // it, and a cache that missed that would serve one
+                        // site's response to another.
+                        if (allowed != "*") context.Response.Headers.Vary = "Origin";
+                        context.Response.Headers.AccessControlAllowHeaders = "Content-Type";
+                        context.Response.Headers.AccessControlAllowMethods = "GET, POST, OPTIONS";
+                    }
+
+                    // A preflight is answered here rather than falling through
+                    // to a 405 from routing, which a browser reports as a CORS
+                    // failure with no indication that the route exists.
+                    if (HttpMethods.IsOptions(context.Request.Method))
+                    {
+                        context.Response.StatusCode = 204;
+                        return;
+                    }
+                    await next();
+                });
+            }
+
+            if (config.LogRequestBody)
+            {
+                app.Use(async (context, next) =>
+                {
+                    if (context.Request.ContentType?.StartsWith(
+                            "application/json", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        // Buffered so the route can still read it: a body read
+                        // once is gone, and logging it would otherwise cost the
+                        // request it was logging.
+                        context.Request.EnableBuffering();
+                        var buffer = new byte[Math.Min(4096, config.MaxRequestBodyBytes)];
+                        var read = await context.Request.Body.ReadAsync(buffer);
+                        context.Request.Body.Position = 0;
+                        var body = System.Text.Encoding.UTF8.GetString(buffer, 0, read);
+                        Write($"{context.Request.Method} {context.Request.Path} body: {body}"
+                              + (read == buffer.Length ? " (truncated)" : ""));
+                    }
+                    await next();
+                });
+            }
 
             _jobs = new InstallJobs(config.ModelSpecsDirectory, Write)
             {

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Text.Json;
 using System.Runtime.CompilerServices;
 using AudioCpp.Server;
 using Avalonia.Threading;
@@ -22,6 +23,9 @@ public sealed class ServerModelRow(string id, string path, string family, string
     public IReadOnlyList<string> Modes { get; } = ["offline", "streaming"];
 
     public ServerModel ToSpec() => new(Id, Family, Path, Task, Mode);
+
+    public static ServerModelRow FromSpec(ServerModel spec) =>
+        new(spec.Id, spec.Path, spec.Family, spec.Task) { Mode = spec.Mode };
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -134,15 +138,13 @@ public sealed class ServerPage : INotifyPropertyChanged, IAsyncDisposable
         }
 
         Refresh();
-        await _server.StartAsync(new ServerConfig
-        {
-            Host = Host,
-            Port = Port,
-            Backend = Backend,
-            Threads = Threads,
-            LazyLoad = LazyLoad,
-            Models = [.. Models.Select(m => m.ToSpec())],
-        });
+        var config = Compose();
+        // Saved before the start, not after it. A config that fails to start is
+        // the one most worth keeping: the next thing the user does is reopen
+        // the page and fix it, and losing what they typed because it did not
+        // work is the opposite of helpful.
+        Persist(config);
+        await _server.StartAsync(config);
 
         Status = _server.State == ServerState.Running
             ? $"Serving on {Address}."
@@ -206,6 +208,85 @@ public sealed class ServerPage : INotifyPropertyChanged, IAsyncDisposable
         AddModelCommand.RaiseCanExecuteChanged();
         RemoveModelCommand.RaiseCanExecuteChanged();
     }
+
+    /// <summary>Where the page's configuration lives between runs.</summary>
+    /// <remarks>
+    /// A real server.json in the app's config folder rather than a private
+    /// settings blob, so the same file can be handed to audio.cpp's server —
+    /// which is the point of matching its schema in the first place.
+    /// </remarks>
+    public static string ConfigPath => System.IO.Path.Combine(
+        AppData.Root(Environment.SpecialFolder.ApplicationData), "server.json");
+
+    private ServerConfig Compose() => new()
+    {
+        Host = Host,
+        Port = Port,
+        Backend = Backend,
+        Threads = Threads,
+        LazyLoad = LazyLoad,
+        VoiceDir = VoiceDir,
+        UiManagement = UiManagement,
+        CorsOrigins = CorsOrigins,
+        Models = [.. Models.Select(m => m.ToSpec())],
+        Extra = _loaded?.Extra ?? [],
+    };
+
+    private void Persist(ServerConfig config)
+    {
+        try
+        {
+            ServerConfigFile.Save(ConfigPath, config);
+            _loaded = config;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // Not fatal and not silent: the server still starts, and the user
+            // is told their settings will not survive rather than discovering
+            // it next time.
+            Status = $"Running, but the configuration could not be saved: {error.Message}";
+        }
+    }
+
+    /// <summary>Restores the last configuration, if there is one.</summary>
+    public void Restore()
+    {
+        if (!File.Exists(ConfigPath)) return;
+        try
+        {
+            var config = ServerConfigFile.Load(ConfigPath);
+            _loaded = config;
+            Host = config.Host;
+            Port = config.Port;
+            Backend = config.Backend;
+            Threads = config.Threads;
+            LazyLoad = config.LazyLoad;
+            VoiceDir = config.VoiceDir;
+            UiManagement = config.UiManagement;
+            CorsOrigins = config.CorsOrigins;
+            Models.Clear();
+            foreach (var model in config.Models) Models.Add(ServerModelRow.FromSpec(model));
+            Refresh();
+        }
+        catch (Exception error) when (error is IOException or JsonException
+                                      or InvalidDataException)
+        {
+            // A config that cannot be read is reported rather than replaced:
+            // overwriting it with defaults on the next save would destroy
+            // whatever the user was in the middle of fixing.
+            Status = $"Could not read {ConfigPath}: {error.Message}";
+        }
+    }
+
+    private ServerConfig? _loaded;
+
+    public string VoiceDir { get => _voiceDir; set => Set(ref _voiceDir, value); }
+    public bool UiManagement { get => _uiManagement; set => Set(ref _uiManagement, value); }
+    public string CorsOrigins { get => _corsOrigins; set => Set(ref _corsOrigins, value); }
+
+    private string _voiceDir = "";
+    private bool _uiManagement;
+    private string _corsOrigins = "";
 
     public async ValueTask DisposeAsync()
     {
