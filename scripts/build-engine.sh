@@ -49,7 +49,9 @@ cmake -S "$ENGINE" -B "$BUILD" \
 # and quietly does nothing on a rebuild, leaving a CPU-only library that fails
 # much later with "CUDA backend requested but it is not registered in this build".
 # Say so here, where the flag was actually given.
-cuda="$(sed -n 's/^ENGINE_ENABLE_CUDA:BOOL=//p' "$BUILD/CMakeCache.txt" 2>/dev/null)"
+# The || true matters under set -e: sed exits non-zero on a missing cache, and a
+# bare assignment from a command substitution carries that status.
+cuda="$(sed -n 's/^ENGINE_ENABLE_CUDA:BOOL=//p' "$BUILD/CMakeCache.txt" 2>/dev/null || true)"
 for argument in "$@"; do
     case "$argument" in
         -DGGML_CUDA=[Oo][Nn]|-DGGML_CUDA=1|-DGGML_CUDA:BOOL=[Oo][Nn])
@@ -60,6 +62,8 @@ for argument in "$@"; do
                 echo "         option the engine actually reads."
                 echo
             fi
+            # Said once, however many times the flag was repeated.
+            break
             ;;
     esac
 done
