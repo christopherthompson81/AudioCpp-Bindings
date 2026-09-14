@@ -15,3 +15,6 @@ audiocpp-studio/
 tools/perf/reference/*.txt
 native/audioio/build/
 __pycache__/
+
+# package-macos.sh writes the .app bundle here.
+dist/

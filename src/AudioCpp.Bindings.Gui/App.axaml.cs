@@ -24,6 +24,14 @@ public partial class App : Application
                 LiveCheck.Arm(viewModel, args, seconds: 8);
             }
         }
+        // macOS reads an app's Dock icon from its .app bundle, and this is a bare
+        // executable unless package-macos.sh built one, so it would otherwise show
+        // the generic .NET rocket. ApplicationIcon is a Windows PE resource and
+        // Window.Icon is the title-bar proxy, so neither covers the Dock tile.
+        // No-op everywhere else.
+        if (OperatingSystem.IsMacOS())
+            MacDockIcon.Set("avares://AudioCpp.Bindings.Gui/Assets/AppIcon.png");
+
         base.OnFrameworkInitializationCompleted();
     }
 }
