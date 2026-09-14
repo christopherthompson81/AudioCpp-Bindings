@@ -1010,6 +1010,26 @@ internal static class LiveCheck
                 Expect("something reached the log", server.Log.Count > 0,
                        server.Log.Count > 0 ? server.Log[^1] : "");
 
+                // Health polls must not be in it. The page polls every two
+                // seconds and keeps 500 lines, so logging them would bury
+                // everything worth reading within the hour.
+                using var quiet = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+                for (var poll = 0; poll < 5; poll++)
+                {
+                    await quiet.GetStringAsync($"{server.Address}/health");
+                }
+                await Task.Delay(100);
+                Expect("health polls do not fill the log",
+                       !server.Log.Any(line => line.Contains("/health", StringComparison.Ordinal)),
+                       string.Join(" | ", server.Log.TakeLast(3)));
+
+                // A request that is an event still is one.
+                await quiet.GetStringAsync($"{server.Address}/v1/models");
+                await Task.Delay(100);
+                Expect("but a real request is logged",
+                       server.Log.Any(line => line.Contains("/v1/models", StringComparison.Ordinal)),
+                       string.Join(" | ", server.Log.TakeLast(3)));
+
                 await server.StopCommand.ExecuteAsync();
                 await Task.Delay(300);
                 Expect("the page stops it", !server.IsRunning);
