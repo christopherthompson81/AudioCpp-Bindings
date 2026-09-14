@@ -4,6 +4,7 @@
         xmlns:res="clr-namespace:AudioCpp.Bindings.Gui.Resources"
         x:Class="AudioCpp.Bindings.Gui.MainWindow"
         x:DataType="vm:MainWindowViewModel"
+        Icon="avares://AudioCpp.Bindings.Gui/Assets/AppIcon.png"
         Title="audio.cpp — native studio" Width="1400" Height="940"
         Background="{DynamicResource AppBg}">
 

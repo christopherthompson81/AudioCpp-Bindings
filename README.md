@@ -102,6 +102,24 @@ dotnet run --project src/AudioCpp.Bindings.Gui -- --smoke \
 
 Exit codes follow CTest: 0 pass, 1 fail, 77 skip.
 
+## Installing it
+
+```bash
+./scripts/build-engine.sh -DENGINE_ENABLE_CUDA=ON   # or without, for CPU
+./scripts/build-native.sh                           # the audio shim
+./install.sh                                        # ~/.local/share/audiocpp-studio
+```
+
+That publishes the app self-contained, registers icons and a `.desktop` entry, and
+copies the engine, the audio shim, the model specs and the VAD weights in beside it —
+laid out exactly as they sit in a checkout, which is why an installed copy finds them
+with no environment set and no code that knows about being installed.
+
+`./uninstall.sh` reverses it, keeping settings unless given `--purge`, and never
+touching downloaded models. `./package-macos.sh` builds a real `.app`;
+`install-windows.ps1` and `uninstall-windows.ps1` do the same job on Windows. See
+[docs/packaging.md](docs/packaging.md).
+
 ## Tests
 
 ```bash

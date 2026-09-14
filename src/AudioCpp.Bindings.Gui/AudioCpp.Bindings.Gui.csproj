@@ -10,7 +10,18 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AssemblyName>AudioCpp.Bindings.Gui</AssemblyName>
     <RootNamespace>AudioCpp.Bindings.Gui</RootNamespace>
+    <!-- A Windows PE resource, which is what Explorer and the taskbar read off
+         the .exe. It is not what Avalonia draws in the window, and macOS cannot
+         read .ico at all, hence Window.Icon and MacDockIcon as well. -->
+    <ApplicationIcon>Assets/icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Only the master is embedded. The per-size PNGs and the .ico are inputs
+         to packaging, read from disk by the install scripts. Embedding them too would add
+         a third of a megabyte to every build for nothing. -->
+    <AvaloniaResource Include="Assets/AppIcon.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.2" />
