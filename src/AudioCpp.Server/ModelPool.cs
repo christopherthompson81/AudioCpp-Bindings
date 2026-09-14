@@ -71,8 +71,11 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
 
         while (true)
         {
+            // Weights, not sessions: a model whose CreateSession threw still
+            // holds its weights, and counting only sessions would let those
+            // hide from the limit entirely.
             var resident = _entries
-                .Where(pair => pair.Key != loading && pair.Value.Session is not null)
+                .Where(pair => pair.Key != loading && pair.Value.Model is not null)
                 .ToArray();
             if (resident.Length + 1 <= config.MaxLoadedModels) return;
 
@@ -85,10 +88,10 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
                 if (!await pair.Value.Gate.WaitAsync(0, cancel)) continue;
                 try
                 {
-                    if (pair.Value.Session is null) continue;
-                    pair.Value.Session.Dispose();
+                    if (pair.Value.Model is null) continue;
+                    pair.Value.Session?.Dispose();
                     pair.Value.Session = null;
-                    pair.Value.Model?.Dispose();
+                    pair.Value.Model.Dispose();
                     pair.Value.Model = null;
                     log($"evicted {pair.Key} to stay within max_loaded_models "
                         + $"({config.MaxLoadedModels})");
@@ -313,10 +316,6 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
     }
 
     /// <summary>
-    /// Run something with the model itself as well as its session, for a route
-    /// that has to ask the model about its own contract.
-    /// </summary>
-    /// <summary>
     /// Run something against a model's session, with the model loaded if it is
     /// not already and nothing else using it.
     /// </summary>
@@ -362,15 +361,17 @@ public sealed class ModelPool(ServerConfig config, Action<string> log) : IDispos
             if (entry.Session is null)
             {
                 var started = DateTime.UtcNow;
+                // Room made before the weights are read, not between them and
+                // the session. The weights are the memory; loading them first
+                // and evicting afterwards means every model the limit allows
+                // plus this one are resident at once, which is the moment the
+                // limit exists to prevent.
+                if (entry.Model is null) await MakeRoomAsync(id, cancel);
                 // spec, not entry.Spec: a reconfigured id keeps its entry (and
                 // its gate, which callers may be queued on) while the
                 // description it loads from changes underneath.
                 entry.Model ??= _registry.Load(spec.Path,
                     new ModelConfig(spec.Family.Length > 0 ? spec.Family : null));
-                // Room made before the load, not after: loading first and
-                // then evicting means both models are resident at the moment
-                // the limit exists to prevent.
-                await MakeRoomAsync(id, cancel);
                 entry.Session = entry.Model.CreateSession(
                     spec.Task, spec.Mode,
                     new BackendConfig(config.Backend, config.Device, config.Threads));
