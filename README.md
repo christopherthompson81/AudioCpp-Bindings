@@ -1,21 +1,40 @@
 # AudioCpp-Bindings
 
 .NET bindings for [audio.cpp](https://github.com/0xShug0/audio.cpp) over its C ABI,
-plus an Avalonia sample that uses them.
+and a desktop app built on them.
 
-The C ABI itself is proposed upstream in
-[0xShug0/audio.cpp#530](https://github.com/0xShug0/audio.cpp/pull/530). These bindings
-live here rather than in that tree: the upstream proposal
+The C ABI these bind to was contributed upstream and merged as
+[0xShug0/audio.cpp#530](https://github.com/0xShug0/audio.cpp/pull/530). The bindings
+live here rather than in that tree because the proposal that led to it
 ([#525](https://github.com/0xShug0/audio.cpp/issues/525)) deliberately scoped language
-bindings out, and the maintainer would rather not carry them.
+bindings out — the ABI belongs upstream, the language bindings do not.
+
+## The app
+
+`src/AudioCpp.Bindings.Gui` is an Avalonia desktop application that mirrors audio.cpp's
+web UI: the same seven workflows (text to speech, transcription, music generation, voice
+conversion, source separation, audio analysis, voice design), the same model manager for
+browsing and installing packages, and its interface strings imported from the web UI's
+own language files so the two read alike in English, Italian, Polish, Russian and
+Simplified Chinese.
+
+It also embeds a server that reimplements audio.cpp's HTTP API in C# — the OpenAI-shaped
+speech and transcription routes, alignment, voices, live ingest, model management and the
+`/v1/ui` endpoints — so an existing client can be pointed at it unchanged. That server
+exists as much to exercise the bindings as to be useful: serving the same API as the
+reference implementation is what turns "the binding compiles" into "the binding behaves",
+and it has found several ABI limitations that nothing else surfaced.
 
 | | |
 |---|---|
 | `src/AudioCpp` | the binding — `net10.0`, AOT-compatible, no package references |
+| `src/AudioCpp.Packages` | the model catalogue and package installer |
+| `src/AudioCpp.Server` | audio.cpp's HTTP API, reimplemented |
+| `src/AudioCpp.Bindings.Gui` | the Avalonia app |
 | `tests/AudioCpp.PathTest` | the ABI contract, offline and streaming |
 | `tests/AudioCpp.ModelTest` | real families across five task types |
-| `src/AudioCpp.Bindings.Gui` | an Avalonia 12 app driving the ABI |
-| `scripts/run-tests.sh` | runs both tests and checks they agree with the C tests |
+| `tests/AudioCpp.ServerTest` | the HTTP surface, against real models |
+| `scripts/run-tests.sh` | runs the tests and checks they agree with the C tests |
 
 ## Prerequisites
 
@@ -33,7 +52,7 @@ managed assembly. Models come from audio.cpp's own model manager:
 python3 tools/model_manager_v2.py install kokoro_82m_q8_0 --models-root /path/to/models
 ```
 
-## The sample
+## Running it
 
 ```bash
 export AUDIOCPP_NATIVE_DIR=/path/to/audio.cpp/build/bin
@@ -91,3 +110,11 @@ so it is read synchronously on the calling thread.
 
 **Threads.** The native library never calls `omp_set_num_threads` — process-global state —
 so `BackendConfig.Threads` is the only place it is set.
+
+## Licence
+
+Apache 2.0, the same licence as audio.cpp — see [LICENSE](LICENSE).
+
+`NOTICE` records what is taken from elsewhere: the Italian, Polish, Russian and
+Simplified Chinese interface strings are imported verbatim from audio.cpp's web UI
+language files, and `native/audioio/miniaudio.h` is vendored under its own terms.
