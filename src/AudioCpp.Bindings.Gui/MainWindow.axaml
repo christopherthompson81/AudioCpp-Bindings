@@ -20,7 +20,7 @@
       <Grid ColumnDefinitions="Auto,24,Auto,*,Auto">
         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
           <Border Width="34" Height="34" CornerRadius="9"
-                  Background="{DynamicResource AppAccent}">
+                  Background="{DynamicResource AppMark}">
             <TextBlock Text="A" FontSize="18" FontWeight="Bold"
                        Foreground="{DynamicResource AppTextInvert}"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
