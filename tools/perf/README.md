@@ -15,12 +15,11 @@ engine, not the UI.
 ## Running
 
 ```bash
-export AUDIOCPP_NATIVE_DIR=/path/to/audio.cpp/build/bin
 dotnet build tools/perf/VadPipeline
 
 # VAD + Parakeet, per-segment, 8 threads
 dotnet run --project tools/perf/VadPipeline -- \
-    /path/to/audio.cpp/assets/framework/models/silero_vad \
+    external/audio.cpp/assets/framework/models/silero_vad \
     /path/to/models/Parakeet-TDT-0.6B-v3-GGUF/parakeet-tdt-0.6b-v3-q8_0.gguf \
     en-US/en-US_sample_01_90s.wav 0 28 8
 ```

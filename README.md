@@ -38,24 +38,31 @@ and it has found several ABI limitations that nothing else surfaced.
 
 ## Prerequisites
 
-A built `libaudiocpp` from an audio.cpp checkout with the C ABI enabled:
+audio.cpp itself is a submodule, pinned to the commit these bindings are built and
+tested against, so the engine version is recorded in the tree rather than chosen by
+whoever runs the build:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAUDIOCPP_BUILD_C_API=ON
-cmake --build build --target audiocpp
+git clone --recurse-submodules https://github.com/christopherthompson81/AudioCpp-Bindings
+cd AudioCpp-Bindings
+./scripts/build-engine.sh          # add -DGGML_CUDA=ON, or any other cmake flag
 ```
 
-Point the binding at it with `AUDIOCPP_NATIVE_DIR`, or place the library beside the
-managed assembly. Models come from audio.cpp's own model manager:
+That builds `libaudiocpp` with the C ABI enabled into `external/audio.cpp/build/bin`,
+where the binding looks for it by default — no environment variable, and no second
+checkout to keep in step. To build against your own audio.cpp instead, point
+`AUDIOCPP_NATIVE_DIR` at its `build/bin`; an explicit setting always wins. The pin is
+the version that is tested, not the only one that works.
+
+Models come from audio.cpp's own model manager:
 
 ```bash
-python3 tools/model_manager_v2.py install kokoro_82m_q8_0 --models-root /path/to/models
+python3 external/audio.cpp/tools/model_manager_v2.py install kokoro_82m_q8_0 --models-root /path/to/models
 ```
 
 ## Running it
 
 ```bash
-export AUDIOCPP_NATIVE_DIR=/path/to/audio.cpp/build/bin
 dotnet run --project src/AudioCpp.Bindings.Gui
 ```
 
@@ -83,12 +90,14 @@ Exit codes follow CTest: 0 pass, 1 fail, 77 skip.
 ## Tests
 
 ```bash
-./scripts/run-tests.sh /path/to/audio.cpp/build /path/to/models
+./scripts/run-tests.sh /path/to/models
 ```
 
 Runs both C# tests and then checks the bindings report exactly what audio.cpp's own C
-tests report for the same models. Without a models argument it runs only the path test,
-which needs no downloads.
+tests report for the same models — including against the C test binaries from the same
+pinned build, so both languages are driving the same engine. Without a models argument
+it runs only the path test, which needs no downloads. Pass a build directory first to
+test against an engine built somewhere else.
 
 ## Notes
 

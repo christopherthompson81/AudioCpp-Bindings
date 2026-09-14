@@ -2,12 +2,34 @@
 # Runs the C# tests against a built libaudiocpp, and checks that the bindings
 # report exactly what the C tests report for the same models.
 #
-#   ./run-tests.sh <build-dir> [models-root]
+#   ./run-tests.sh [models-root] [threads]
+#   ./run-tests.sh <build-dir> [models-root] [threads]
+#
+# With no build directory it uses the pinned engine build that
+# scripts/build-engine.sh produces, which is the version these tests are
+# written against.
 #
 # Exit codes follow CTest: 0 pass, 1 fail, 77 skip.
 set -uo pipefail
 
-BUILD_DIR="${1:?usage: run-tests.sh <build-dir> [models-root] [threads]}"
+BINDINGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENGINE="$BINDINGS_ROOT/external/audio.cpp"
+# The build directory used to be required and first. Now that it defaults to the
+# pinned engine it is usually absent, and the models root -- still the argument
+# that matters -- would otherwise have to be preceded by a path nobody needs to
+# type. A configured build directory always has a CMakeCache.txt and a models root
+# never does, so which was meant is decidable rather than guessed. Both the old
+# two-argument form and the short form work, and the choice is printed.
+if [ -n "${1:-}" ] && [ ! -f "$1/CMakeCache.txt" ]; then
+    set -- "$ENGINE/build" "$@"
+    echo "using the pinned engine build; treating $2 as the models root"
+fi
+BUILD_DIR="${1:-$ENGINE/build}"
+if [ ! -d "$BUILD_DIR" ]; then
+    echo "no engine build at $BUILD_DIR"
+    echo "build the pinned engine first: ./scripts/build-engine.sh"
+    exit 77
+fi
 MODELS_ROOT="${2:-}"
 # Resolved before the cd below. Left relative it would resolve against the engine's
 # source tree, and a models root that is merely in the wrong place reports "no
@@ -23,18 +45,25 @@ fi
 # unaffected by the count. Both languages get the same number so the
 # cross-language diff compares like with like.
 THREADS="${3:-$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) )}"
-BINDINGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Multi-config generators -- Visual Studio, Xcode, Ninja Multi-Config -- put
 # outputs in a per-configuration subdirectory, so bin/ alone finds nothing on a
 # tree where the library is sitting right there. That reads as "not applicable"
 # and passes, which is the failure mode worth avoiding.
 BIN_ROOT="$(cd "$BUILD_DIR" && pwd)/bin"
 # The VAD model and the sample clips the tests read belong to audio.cpp, not to
-# this repository, which is a standalone consumer of the published ABI. CMake
-# records the source tree it configured from, so the build directory the caller
-# already passes is enough to find them -- no second path argument, and no
-# assumption that this checkout sits inside the engine's tree.
+# this repository, which is a standalone consumer of the published ABI. The
+# pinned submodule carries them, so the default run needs no path argument at all.
+# For a build directory passed in from elsewhere, CMake records the source tree it
+# was configured from, which is the tree whose assets match that build.
+# CMAKE_HOME_DIRECTORY is the absolute path of whatever machine configured the
+# build, so it is wrong for a build directory copied between machines or a source
+# tree moved after configuring. The pinned submodule is right regardless of where
+# the checkout lives, so it backstops the cache rather than the other way around:
+# an external build directory still gets the tree it was actually configured from.
 SOURCE_ROOT="${AUDIOCPP_SOURCE_ROOT:-$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt" 2>/dev/null)}"
+if [ ! -d "${SOURCE_ROOT:-}/assets" ] && [ -d "$ENGINE/assets" ]; then
+    SOURCE_ROOT="$ENGINE"
+fi
 BIN=""
 SEARCHED=""
 for config in "" Release RelWithDebInfo MinSizeRel Debug; do
@@ -57,11 +86,10 @@ fi
 echo "native: $BIN"
 
 if [ ! -d "${SOURCE_ROOT:-}/assets" ]; then
-    # CMAKE_HOME_DIRECTORY is the absolute path of whatever machine configured the
-    # build, so a build directory copied between machines or a source tree moved
-    # after configuring lands here. Print what was tried -- a bare "skipping" is the
-    # same silent-green failure the bin/ search above is written to avoid.
+    # Print what was tried -- a bare "skipping" is the same silent-green failure
+    # the bin/ search above is written to avoid.
     echo "cannot locate the audio.cpp source tree."
+    echo "  pinned engine: $ENGINE (not checked out?)"
     echo "  from: $BUILD_DIR/CMakeCache.txt"
     echo "  tried: ${SOURCE_ROOT:-<empty>}"
     echo "Set AUDIOCPP_SOURCE_ROOT to override. Skipping."

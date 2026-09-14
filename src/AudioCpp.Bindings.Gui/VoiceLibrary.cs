@@ -111,8 +111,16 @@ public sealed class VoiceLibrary
         }
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            var candidate = System.IO.Path.Combine(dir.FullName, "audio.cpp", relative);
-            if (Directory.Exists(candidate)) return candidate;
+            // The pinned engine first, then a sibling checkout for anyone
+            // building against their own.
+            foreach (var candidate in new[]
+                     {
+                         System.IO.Path.Combine(dir.FullName, "external", "audio.cpp", relative),
+                         System.IO.Path.Combine(dir.FullName, "audio.cpp", relative),
+                     })
+            {
+                if (Directory.Exists(candidate)) return candidate;
+            }
         }
         return null;
     }

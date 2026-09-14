@@ -41,35 +41,38 @@ internal static class NativeLibraryResolver
     }
 
     /// <summary>
-    /// Where to look, in order: an explicit setting, then the usual places an
-    /// audio.cpp build sits relative to a checkout of this repository.
+    /// Where to look, in order: an explicit setting, then the engine build this
+    /// repository pins.
     /// </summary>
     /// <remarks>
-    /// Requiring AUDIOCPP_NATIVE_DIR for every run is a papercut: the library is
-    /// almost always in a build directory of a sibling audio.cpp checkout, and
-    /// looking there costs a few File.Exists calls on first interop use. The
-    /// environment variable still wins, so an explicit choice is never
-    /// second-guessed.
+    /// The engine is a submodule pinned to a known commit and built into a known
+    /// place, so the default is one path rather than a guess: scripts/build-engine.sh
+    /// puts it in external/audio.cpp/build/bin. AUDIOCPP_NATIVE_DIR still wins,
+    /// which is what a consumer building against their own audio.cpp checkout
+    /// sets -- the pin is the tested version, not the only supported one.
     /// </remarks>
     private static IEnumerable<string> SearchDirectories()
     {
         var configured = Environment.GetEnvironmentVariable("AUDIOCPP_NATIVE_DIR");
         if (!string.IsNullOrEmpty(configured)) yield return configured;
 
-        // Common CMake build directory names, in the order a developer is
-        // likeliest to have built most recently.
-        string[] builds = ["build", "build-cuda", "build-release", "cmake-build-release"];
-
         // Walking up already visits every ancestor, so checking dir and dir.Parent
-        // on each step would probe each one twice.
+        // on each step would probe each one twice. The walk is what lets this work
+        // from a test binary nested several directories deep in bin/Debug/net10.0.
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            foreach (var build in builds)
-            {
-                yield return Path.Combine(dir.FullName, "audio.cpp", build, "bin");
-            }
+            var bin = Path.Combine(dir.FullName, "external", "audio.cpp", "build", "bin");
+            yield return bin;
+
+            // Multi-config generators -- Visual Studio, Xcode, Ninja Multi-Config --
+            // put outputs in a per-configuration subdirectory, so bin/ alone finds
+            // nothing on a tree where the library is sitting right there.
+            foreach (var config in Configurations) yield return Path.Combine(bin, config);
         }
     }
+
+    private static readonly string[] Configurations =
+        ["Release", "RelWithDebInfo", "MinSizeRel", "Debug"];
 
     private static IEnumerable<string> FileNames()
     {
