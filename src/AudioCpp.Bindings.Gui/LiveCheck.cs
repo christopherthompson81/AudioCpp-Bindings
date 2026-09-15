@@ -803,25 +803,26 @@ internal static class LiveCheck
                     // would make the tab a model lands on depend on iteration
                     // order, and a task in none is unreachable, which is what
                     // #36 was about.
-                    // Every task name the installed specs actually use has to be
-                    // in the vocabulary. Upstream adding one this does not know
-                    // would silently hide those packages from every tab, which
-                    // is exactly how the music workflow came to be empty.
+                    // Every task name the installed specs actually use has to
+                    // translate to a task token. The engine answers this itself
+                    // now, so a name that maps to nothing is no longer "a name
+                    // this repo's table had not heard of" -- it is a spec
+                    // declaring a task the engine would refuse to build a
+                    // session for, which is a real defect rather than a gap
+                    // here. Worth failing on: the package would otherwise
+                    // vanish from every tab, which is how the music workflow
+                    // came to be empty.
                     var declared = viewModel.AllEntries
                         .SelectMany(e => e.Family.Tasks)
                         .Distinct().OrderBy(t => t, StringComparer.Ordinal).ToList();
                     var unmapped = declared
-                        .Where(t => SpecTasks.Abi(t) is null && !SpecTasks.Unmappable.ContainsKey(t))
+                        .Where(t => AudioCppTasks.FromSpecName(t) is null)
                         .ToList();
-                    foreach (var (name, why) in SpecTasks.Unmappable
-                                 .Where(u => declared.Contains(u.Key)))
-                    {
-                        Console.WriteLine($"  '{name}' is deliberately unmapped: {why}");
-                    }
+                    Console.WriteLine($"  engine task tokens: {string.Join(" ", AudioCppTasks.All)}");
                     Console.WriteLine($"  spec vocabulary in use: {string.Join(" ", declared)}");
                     if (unmapped.Count > 0)
                     {
-                        Console.Error.WriteLine($"  spec tasks with no ABI token: "
+                        Console.Error.WriteLine($"  spec tasks the engine maps to no task kind: "
                                                 + string.Join(", ", unmapped));
                         failures++;
                     }

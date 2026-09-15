@@ -49,11 +49,11 @@ public sealed class CatalogEntry(FamilySpec family, PackageSpec package)
 
     /// <summary>Whether this family can do the given ABI task, for filtering the picker.</summary>
     /// <remarks>
-    /// Through <see cref="SpecTasks"/>: a spec declares "music" where the ABI
-    /// takes "gen", so comparing the two directly matched nothing.
+    /// Through <see cref="AudioCppTasks.FromSpecName"/>: a spec declares "music"
+    /// where the ABI takes "gen", so comparing the two directly matched nothing.
     /// </remarks>
     public bool SupportsTask(string task) =>
-        Family.Tasks.Any(declared => SpecTasks.Abi(declared) == task);
+        Family.Tasks.Any(declared => AudioCppTasks.FromSpecName(declared) == task);
 
     public InstallState State
     {

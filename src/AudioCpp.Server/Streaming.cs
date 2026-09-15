@@ -368,7 +368,14 @@ internal static class Streaming
         {
             using var contract = new AudioCppRequest();
             contract.SetAudio(new float[1], format.SampleRate, format.Channels);
-            if (format.Language.Length > 0) contract.SetText("", format.Language);
+            // The transcript language alone, not the "language" request option.
+            // Setting text purely to carry the language was the old way through
+            // this ABI, and it sent the option as a side effect -- which a
+            // family that validates its options strictly, parakeet_tdt among
+            // them, refuses outright. There is no retry on a live route to
+            // recover from that, so ?language= simply failed against those
+            // models.
+            if (format.Language.Length > 0) contract.SetTextLanguage(format.Language);
             session.StartStream(contract);
             sse = Sse.Begin(http.Response);
 
@@ -408,6 +415,11 @@ internal static class Streaming
         {
             using var contract = new AudioCppRequest();
             contract.SetAudio(new float[1], format.SampleRate, format.Channels);
+            // Kept as set_text, unlike the transcription route above: this is a
+            // speech family, and the ones that read the language read it from
+            // options["language"] the way the CLI's --language delivers it.
+            // Sending the transcript language alone would quietly stop reaching
+            // them.
             if (format.Language.Length > 0) contract.SetText("", format.Language);
             session.StartStream(contract);
             sse = Sse.Begin(http.Response);

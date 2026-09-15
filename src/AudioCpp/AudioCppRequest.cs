@@ -25,12 +25,38 @@ public sealed class AudioCppRequest : SafeHandle
     /// also written to the request's "language" option, matching what the CLI's
     /// <c>--language</c> does, because some families read only the option.
     /// </summary>
+    /// <remarks>
+    /// To set the transcript language without the option — which a family that
+    /// validates its options strictly will refuse — pass null here and use
+    /// <see cref="SetTextLanguage"/>.
+    /// </remarks>
     public AudioCppRequest SetText(string text, string? language = null)
     {
         ArgumentNullException.ThrowIfNull(text);
         AudioCppException.ThrowIfFailed(
             NativeMethods.audiocpp_request_set_text(handle, text, language),
             nameof(NativeMethods.audiocpp_request_set_text));
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the transcript language alone, leaving the request's "language"
+    /// option untouched.
+    /// </summary>
+    /// <remarks>
+    /// "Does this model declare a language option" and "does this model need a
+    /// transcript language" are different questions with different answers:
+    /// parakeet_tdt refuses a request carrying a <c>language</c> option it does
+    /// not declare, while qwen3_forced_aligner declares no such option and
+    /// requires the transcript language anyway. Through <see cref="SetText"/>
+    /// alone the two travel together, so neither model could be served
+    /// correctly without guessing.
+    /// </remarks>
+    public AudioCppRequest SetTextLanguage(string? language)
+    {
+        AudioCppException.ThrowIfFailed(
+            NativeMethods.audiocpp_request_set_text_language(handle, language),
+            nameof(NativeMethods.audiocpp_request_set_text_language));
         return this;
     }
 

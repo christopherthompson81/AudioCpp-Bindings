@@ -58,6 +58,17 @@ internal static unsafe partial class NativeMethods
     [LibraryImport(Library)]
     internal static partial AudioCppStatus audiocpp_registry_family(IntPtr registry, nuint index, out IntPtr outFamily);
 
+    // ---- task vocabulary -------------------------------------------------
+
+    [LibraryImport(Library)]
+    internal static partial nuint audiocpp_task_count();
+
+    [LibraryImport(Library)]
+    internal static partial IntPtr audiocpp_task_name(nuint index);
+
+    [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr audiocpp_task_from_spec_name(string specTask);
+
     // ---- model -----------------------------------------------------------
 
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
@@ -130,6 +141,9 @@ internal static unsafe partial class NativeMethods
 
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial AudioCppStatus audiocpp_request_set_text(IntPtr request, string text, string? language);
+
+    [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial AudioCppStatus audiocpp_request_set_text_language(IntPtr request, string? language);
 
     [LibraryImport(Library)]
     internal static partial AudioCppStatus audiocpp_request_set_audio(
