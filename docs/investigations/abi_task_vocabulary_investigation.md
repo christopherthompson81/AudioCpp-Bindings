@@ -248,6 +248,25 @@ model ships with the engine rather than as a catalogue package.
 
 ## Outcome
 
-Pin `3eccab5` → `b46fe6b`. Issues #47, #49, #50 and #65 are closed by what
+Pin `3eccab5` → `5db449e`. Issues #47, #49, #50 and #65 are closed by what
 landed, verified against the built engine rather than the PR description. #48 and
 #68 remain open and untouched.
+
+## Run 7 — 2026-09-15 — re-pinned before proposing
+
+The branch had sat unpushed while the upstream work went on, and upstream moved:
+`b46fe6b` → `5db449e`, one commit, our own #550 (the safetensors `files` lists).
+Re-pinned to current main rather than proposing one commit behind, and re-ran
+everything rather than assuming a spec-only change was inert:
+
+```
+declared: 73   bound: 73
+downloadable: 229 of 237
+ran=5 skipped=0 failures=0
+C and C# agree on 11 reported values
+SUITE exit=0
+```
+
+Unchanged from the `b46fe6b` run, which is what #550 being `model_specs`-only
+predicted — but the prediction was worth one suite run to confirm, since the
+package catalogue reads those specs.
