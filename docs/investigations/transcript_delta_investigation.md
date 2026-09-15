@@ -314,7 +314,7 @@ family's cheapest package and drove it through the CLI on the same clip.
 | `qwen3_asr` | 0.6B q8_0 | 1.2 GB | 1 | yes |
 | `voxtral_realtime` | Mini-4B q4_k | 3.1 GB | 33 | yes |
 | `higgs_audio_stt` | v3-STT q8_0 | 3.2 GB | 4 | yes |
-| `vibevoice_asr_streaming` | 7B q4_k | 5.9 GB | pending | pending |
+| `vibevoice_asr_streaming` | 7B q4_k | 5.9 GB | 5 | unchanged from baseline |
 
 `voxtral_realtime` is the most valuable of these: 33 token-level partials
 (`' Some'`, `' call'`, `' me'`, `' nature'`, `'.'`, …), so the publisher is
@@ -373,3 +373,62 @@ Also lost a download to a backgrounded `( ... ) & ( ... ) & wait` where only the
 first subshell inherited the `cd` — the second failed with
 `can't open file '.../AudioCpp-Bindings/tools/model_manager_v2.py'`. Absolute
 paths in backgrounded subshells.
+
+## Run 8 — 2026-09-15 — vibevoice_asr_streaming, and two bugs that are not mine
+
+`vibevoice_asr_streaming` (served by the same `src/models/vibevoice_asr/session.cpp`
+this PR migrated) produced output that looked broken:
+
+```
+partial_text= 
+partial_text=others call me mother nature. 
+partial_text=I've been here for over four point five 
+partial_text=billion years. Twenty two thousand 
+partial_text=five hundred times longer than you.
+text_output= 
+```
+
+Two things wrong: the opening "Some call me nature." appears in no partial, and
+`text_output` is a lone space. After kroko, the obvious reading was that I had
+broken a second family the same way.
+
+Checked instead of assuming: rebuilt with `origin/main`'s copy of
+`session.cpp` and re-ran. The two outputs are **byte-identical** —
+
+```
+$ diff <(grep -E "^partial_text=|^text_output=" vibe-before.log) \
+       <(grep -E "^partial_text=|^text_output=" vibe.log)
+$ echo $?
+0
+```
+
+So the migration is behaviour-preserving here, which is expected: this family
+already emitted increments through `emit_transcript_delta`, and swapping that for
+the shared publisher changes nothing on Latin text with no revisions. Both
+defects are pre-existing and separate from #68. Not investigated, not fixed, and
+called out in the PR rather than folded into it.
+
+The general lesson, twice in two runs: **when a family looks broken after a
+change, rebuild its file from upstream before concluding anything.** It cost one
+rebuild each and settled both cases definitively — kroko was mine, vibevoice was
+not.
+
+## Outcome (tested)
+
+Four commits on `fix/transcript-delta-increments`, all seven migrated families
+run against real weights rather than read:
+
+| family | partials | result |
+| --- | --- | --- |
+| `parakeet_tdt` | 7 | concatenate to `text_output` |
+| `kroko_asr` | 11 | concatenate, after fixing its `finalize()` |
+| `voxtral_realtime` | 33 | concatenate |
+| `higgs_audio_stt` | 4 | concatenate |
+| `sense_asr` | 1 | concatenate |
+| `qwen3_asr` | 1 | concatenate |
+| `vibevoice_asr_streaming` | 5 | identical to baseline; two pre-existing bugs |
+
+Still uncovered: the byte-fallback path has no live-model test, only the unit
+test, because nothing to hand drives a tokenizer into fallback. And
+`nemotron_asr` plus the two `vibevoice_asr` chunk-append sites take deltas
+produced upstream, so the publisher does not apply to them.
