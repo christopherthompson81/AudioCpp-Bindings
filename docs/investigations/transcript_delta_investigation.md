@@ -432,3 +432,78 @@ Still uncovered: the byte-fallback path has no live-model test, only the unit
 test, because nothing to hand drives a tokenizer into fallback. And
 `nemotron_asr` plus the two `vibevoice_asr` chunk-append sites take deltas
 produced upstream, so the publisher does not apply to them.
+
+## Run 9 — 2026-09-15 — the vibevoice "bugs" were a measurement error
+
+Opened a branch to fix the two defects Run 8 recorded in
+`vibevoice_asr_streaming`: the first window's text never reaching a partial, and
+`text_output` coming back as a lone space. Neither exists.
+
+Reading the code first turned up nothing: `process_streaming_model_normalized_chunk`
+accumulates through `append_streaming_transcript`, `finalize()` returns
+`streaming_result_`, and `append_chunk_speech_metadata` — the other function
+handed the accumulator — touches only spans, never `text_output`. Nothing resets
+the result mid-stream.
+
+So I instrumented it instead of reading further:
+
+```
+[DBG] chunk text=34 delta=34 total=34
+[DBG] chunk text=30 delta=30 total=64
+[DBG] chunk text=40 delta=40 total=104
+[DBG] chunk text=35 delta=35 total=139
+[DBG] chunk text=35 delta=35 total=174
+[DBG] finalize returning total=174
+text_output= 
+```
+
+`finalize()` returns all 174 bytes, and the CLI prints one space. The engine was
+never wrong; the *reading* was. Printing the delta contents rather than their
+lengths showed why — the line came out as `chunk text=[` followed by a line
+break:
+
+**This family's transcript begins `"\n Speaker 0:"`.** The CLI's non-interactive
+format is `partial_text=<text>\n`, so a transcript containing a newline continues
+onto the next line, and the `grep '^partial_text='` and
+`re.findall(r'^partial_text=(.*)$', ...)` I had been extracting with both stop at
+that newline. Everything past it was invisible to the check. Hence an apparently
+empty first partial, an apparently one-space `text_output`, and a concatenation
+that did not match.
+
+Parsing on the `partial_text=` markers instead of per line:
+
+```
+partials: 5
+    ' \n Speaker 0:Some call me nature, '
+    'others call me mother nature. '
+    "I've been here for over four point five "
+    'billion years. Twenty two thousand '
+    'five hundred times longer than you.'
+concat == text_output: True
+```
+
+Correct, and correct before the migration too. Branch deleted, PR description
+corrected, nothing filed.
+
+### What this says about Run 7's table
+
+Every family in Run 7 was checked with the same per-line regex. The six that
+reported `concat == text_output: True` are still trustworthy — a false *pass* is
+not a failure mode of this bug, since a truncated capture makes the
+concatenation shorter and the comparison fail. It produces false **alarms**, not
+false assurances, and vibevoice was the only family whose transcript carries a
+newline. But the harness was wrong and happened not to matter, which is worth
+less than a harness that is right.
+
+### The lesson worth keeping
+
+Run 8 concluded "pre-existing, not mine" from a baseline diff, and that part was
+sound — the outputs were byte-identical. The error was in the step before it:
+treating output my own extraction had mangled as evidence of what the program
+produced. A byte-identical diff of two wrong readings is still two wrong
+readings.
+
+When a field looks empty, dump the raw bytes (`cat -A`, `xxd`) before concluding
+anything about the code that produced it. One `cat -A` at the start of Run 8
+would have shown the `\n Speaker 0:` continuation line immediately and saved
+filing two phantom defects.
