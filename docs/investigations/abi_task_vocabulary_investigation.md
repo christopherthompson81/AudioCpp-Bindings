@@ -270,3 +270,55 @@ SUITE exit=0
 Unchanged from the `b46fe6b` run, which is what #550 being `model_specs`-only
 predicted — but the prediction was worth one suite run to confirm, since the
 package catalogue reads those specs.
+
+## Run 8 — 2026-09-15 — the server language paths, finally exercised
+
+Reviewing the PR turned up a hole in the verification rather than in the code.
+Every suite run so far had printed:
+
+```
+no AUDIOCPP_ASR_MODEL/AUDIOCPP_ASR_AUDIO; skipping transcription
+no AUDIOCPP_ALIGN_MODEL/AUDIOCPP_ALIGN_AUDIO/AUDIOCPP_ALIGN_TEXT; skipping alignment
+```
+
+Those are the two routes #65 is about. The suite was green across five families
+and had never run the code this branch changes most.
+
+Re-ran `AudioCpp.ServerTest` with the exact pair the issue turns on — Parakeet
+TDT as the ASR model (refuses a `language` option it does not declare) and
+Qwen3's forced aligner (declares none and requires the transcript language
+anyway):
+
+```
+ok    a language the model may not declare does not break the request
+      {"text":"Some call me Nature. Others call me Mother Nature. ..."}
+transcription OK
+ok    alignment is 200
+      {"text":"...","language":"en","words":[{"word":"Some","start":0.4,...}]}
+ok    a model that needs a language says so rather than aligning wrongly  500
+alignment OK
+SERVERTEST exit=0     130 assertions, 0 failures
+```
+
+Both sides of #65's dilemma served by the same server, which is the thing the
+issue said was impossible through the old ABI.
+
+### Confirming the retry actually fired
+
+The transcription request succeeded and no "refuses the 'language' request
+option" line appeared, which could mean either the retry worked or the option
+was never refused in the first place. Pool logs *are* captured elsewhere in the
+run (`loaded second (parakeet_tdt) in 1633 ms`), so the absence was suspicious.
+
+Settled it directly:
+
+```
+$ audiocpp_cli --task asr --family parakeet_tdt --model ... --request-option language=en
+audiocpp_cli failed: unknown Parakeet TDT request option: language
+```
+
+So Parakeet does refuse it. A 200 with a correct transcript against that model
+is therefore only reachable through the refusal-and-retry path — it ran, and the
+log simply is not surfaced in the transcription test's captured output. Worth
+recording: "no log line" was not evidence of "no refusal", and the check that
+settled it took one CLI invocation.
