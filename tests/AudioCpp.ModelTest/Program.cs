@@ -95,6 +95,7 @@ internal static class Program
             {
                 RunCase(testCase, modelsRoot, clip, alternate, backend);
             }
+            CheckSuppliedPhonemes(modelsRoot, backend);
         }
         catch (DllNotFoundException exception)
         {
@@ -111,6 +112,108 @@ internal static class Program
         }
         Console.WriteLine("c# model test OK");
         return 0;
+    }
+
+    /// <summary>
+    /// A list-valued request option, end to end: the values have to reach the family and change
+    /// what it synthesizes, not merely be accepted by the setter.
+    ///
+    /// <para>
+    /// Kokoro's <c>phonemes</c> is the only family that reads one today. The option set a model
+    /// declares is embedded in its GGUF at conversion time, so a package built before the option
+    /// existed will not accept it — hence the declaration probe and the skip, rather than a
+    /// failure that only means "your model is older than this test". Point
+    /// <c>AUDIOCPP_KOKORO_SPEC</c> at a spec that declares it to exercise this against such a
+    /// package.
+    /// </para>
+    ///
+    /// <para>
+    /// Emits no <c>parity:</c> lines on purpose: those are diffed against the C test, which does
+    /// not run this.
+    /// </para>
+    /// </summary>
+    private static void CheckSuppliedPhonemes(string modelsRoot, BackendConfig backend)
+    {
+        var modelPath = Path.Combine(modelsRoot, "Kokoro-82M-GGUF", "kokoro-82m-q8_0.gguf");
+        if (!File.Exists(modelPath))
+        {
+            Console.WriteLine("option arrays: no kokoro package; skipping");
+            return;
+        }
+
+        var specOverride = Environment.GetEnvironmentVariable("AUDIOCPP_KOKORO_SPEC") ?? "";
+        var config = new ModelConfig("kokoro_tts") { ModelSpecOverride = specOverride };
+
+        using var registry = AudioCppRegistry.Create();
+        using var model = registry.Load(modelPath, config);
+        if (!model.GetOptions(AudioCppOptionScope.Request).Any(o => o.Name == "phonemes"))
+        {
+            Console.WriteLine("option arrays: this kokoro package does not declare 'phonemes'; skipping "
+                              + "(set AUDIOCPP_KOKORO_SPEC to a spec that does)");
+            return;
+        }
+
+        using var session = model.CreateSession("tts", "offline", backend);
+        var failuresBefore = _failures;
+
+        float[] Speak(string text, IReadOnlyList<string>? phonemes)
+        {
+            using var request = new AudioCppRequest();
+            request.SetText(text, "en-us");
+            request.SetVoiceId("af_heart");
+            if (phonemes is not null) request.SetOptionArray("phonemes", phonemes);
+            using var result = session.Run(request);
+            return result.Audio?.Samples ?? [];
+        }
+
+        // Two readings of the SAME text. If the option were ignored, or if the run cache keyed on
+        // text alone, these would come back identical — which is the bug this guards.
+        var first = Speak("record", ["ɹˈɛkɚd"]);
+        var second = Speak("record", ["ɹɪkˈɔɹd"]);
+        Check(first.Length > 0 && second.Length > 0, "supplied phonemes produced no audio");
+        Check(!first.SequenceEqual(second),
+              "two different phoneme lists for the same text produced identical audio");
+
+        // The list is an array, so a caller's own chunking survives: one call over N entries must
+        // equal N calls concatenated, or the merge is not the same operation the text path does.
+        string[] chunks = ["ðə hˈɑɹbɚ wʌz kwˈaɪət", "lˈɔŋ pˈeɪl bˈændz"];
+        var merged = Speak("the harbour was quiet long pale bands", chunks);
+        var joined = chunks.SelectMany(c => Speak("x", [c])).ToArray();
+        Check(merged.SequenceEqual(joined),
+              $"a {chunks.Length}-entry list ({merged.Length} samples) did not match the same "
+              + $"entries rendered separately ({joined.Length} samples)");
+
+        // Replace, not append: PathTest asserts the repeat is accepted, this asserts which one won.
+        using (var request = new AudioCppRequest())
+        {
+            request.SetText("record", "en-us");
+            request.SetVoiceId("af_heart");
+            request.SetOptionArray("phonemes", ["ɹˈɛkɚd"]);
+            request.SetOptionArray("phonemes", ["ɹɪkˈɔɹd"]);
+            using var result = session.Run(request);
+            Check(result.Audio?.Samples.SequenceEqual(second) == true,
+                  "setting the option twice did not leave the second list");
+        }
+
+        // An undeclared list key must be rejected by the same contract that rejects an undeclared
+        // scalar one, rather than silently ignored.
+        using (var request = new AudioCppRequest())
+        {
+            request.SetText("x", "en-us");
+            request.SetVoiceId("af_heart");
+            request.SetOptionArray("not_a_real_option", ["v"]);
+            var rejected = false;
+            try { using var result = session.Run(request); }
+            catch (AudioCppException) { rejected = true; }
+            Check(rejected, "an undeclared list option was accepted");
+        }
+
+        _ran++;
+        // ⚠ Reports what happened, not that it ran. An earlier version printed "ok"
+        // unconditionally and said so while two of its own Checks were failing.
+        Console.WriteLine(_failures == failuresBefore
+            ? "option arrays: supplied phonemes ok"
+            : $"option arrays: {_failures - failuresBefore} check(s) FAILED");
     }
 
     private static void RunCase(

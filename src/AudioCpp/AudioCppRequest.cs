@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using AudioCpp.Native;
 
 namespace AudioCpp;
@@ -186,6 +187,67 @@ public sealed class AudioCppRequest : SafeHandle
         AudioCppException.ThrowIfFailed(
             NativeMethods.audiocpp_request_set_option(handle, key, value),
             nameof(NativeMethods.audiocpp_request_set_option));
+        return this;
+    }
+
+    /// <summary>
+    /// Sets a list-valued request option — the transport for the model spec's <c>*_list</c>
+    /// option types. Entries keep their order, and a second call with the same key REPLACES the
+    /// list rather than appending, matching <see cref="SetOption"/>'s assignment semantics.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately separate from <see cref="SetOption"/>: a family declares which of the two it
+    /// reads by the type in its spec, so a key set here is invisible to one reading single-valued
+    /// options and vice versa. Passing an empty list sets an EMPTY list, which is a different
+    /// thing from never setting the key at all.
+    /// </para>
+    /// <para>
+    /// The ABI copies both the array and the strings, so nothing here has to outlive the call —
+    /// which is why the pinned buffers are freed in a finally rather than kept alive by the
+    /// request.
+    /// </para>
+    /// </remarks>
+    public unsafe AudioCppRequest SetOptionArray(string key, IReadOnlyList<string> values)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(values);
+
+        // One NUL-terminated UTF-8 buffer per value. Built first, so a null element is rejected
+        // before anything is pinned.
+        var buffers = new byte[values.Count][];
+        for (var i = 0; i < values.Count; i++)
+        {
+            var value = values[i] ?? throw new ArgumentException($"values[{i}] is null", nameof(values));
+            var buffer = new byte[Encoding.UTF8.GetByteCount(value) + 1];
+            Encoding.UTF8.GetBytes(value, buffer);
+            buffers[i] = buffer;
+        }
+
+        var pins = new GCHandle[buffers.Length];
+        var pointers = new IntPtr[buffers.Length];
+        try
+        {
+            for (var i = 0; i < buffers.Length; i++)
+            {
+                pins[i] = GCHandle.Alloc(buffers[i], GCHandleType.Pinned);
+                pointers[i] = pins[i].AddrOfPinnedObject();
+            }
+            fixed (IntPtr* pinned = pointers)
+            {
+                AudioCppException.ThrowIfFailed(
+                    NativeMethods.audiocpp_request_set_option_array(
+                        handle, key, (byte**)pinned, (nuint)buffers.Length),
+                    nameof(NativeMethods.audiocpp_request_set_option_array));
+            }
+        }
+        finally
+        {
+            foreach (var pin in pins)
+            {
+                if (pin.IsAllocated) pin.Free();
+            }
+        }
         return this;
     }
 
