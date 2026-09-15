@@ -77,14 +77,19 @@ internal static class Routes
                 task.SetAudio(clip.Samples, clip.SampleRate, clip.Channels);
 
                 // set_text carries the language, and carrying it sets
-                // options["language"] too -- the two are one action through
-                // this ABI. Whether this model tolerates that is decided by
-                // RunWithLanguageAsync, which hands back the language to
-                // actually use.
+                // options["language"] too. Whether this model tolerates the
+                // option is decided by RunWithLanguageAsync, which hands back
+                // the language that may travel that way -- empty for a model
+                // that has refused it.
                 if (language.Length > 0 || request.Context.Length > 0)
                 {
                     task.SetText(request.Context, language);
                 }
+                // The transcript language regardless, which is separable from
+                // the option now. A model refusing the option used to lose the
+                // caller's language altogether; only the option was ever the
+                // problem.
+                if (request.Language.Length > 0) task.SetTextLanguage(request.Language);
                 foreach (var (name, value) in request.Options)
                 {
                     if (value.Length > 0) task.SetOption(name, value);
@@ -227,9 +232,12 @@ internal static class Routes
 
                 // An aligner is the case that rules out guessing from the
                 // declared options: Qwen3's does not declare "language" and
-                // requires it anyway. Sending it and learning from a refusal is
-                // what serves both it and a strict family like Parakeet.
+                // requires the transcript language anyway. The two are
+                // separable now, so it gets the transcript language
+                // unconditionally, and the option only while no refusal has
+                // been seen.
                 task.SetText(request.Text, language);
+                if (request.Language.Length > 0) task.SetTextLanguage(request.Language);
 
                 using var output = session.Run(task);
                 return new Transcribed(
@@ -296,14 +304,21 @@ internal static class Routes
     }
 
     /// <summary>
-    /// Runs work against a model, deciding whether the caller's language can go
-    /// with it and retrying once without it if the model says no.
+    /// Runs work against a model, deciding whether the caller's language may
+    /// also travel as the <c>language</c> request option and retrying once
+    /// without it if the model says no.
     /// </summary>
     /// <remarks>
-    /// The retry exists because the question cannot be answered in advance —
-    /// see <see cref="ModelPool.RefusesLanguage"/>. It happens at most once per
-    /// model per server lifetime, and the refusal it recovers from is raised
-    /// during option validation, before the model does any work.
+    /// Only the option is at stake. The transcript language is set separately
+    /// by each caller and is safe for every model, so a refusal here no longer
+    /// costs the caller their language — which it did while the ABI offered no
+    /// way to send one without the other.
+    ///
+    /// The retry exists because whether a model wants the option cannot be
+    /// answered in advance — see <see cref="ModelPool.RefusesLanguage"/>. It
+    /// happens at most once per model per server lifetime, and the refusal it
+    /// recovers from is raised during option validation, before the model does
+    /// any work.
     /// </remarks>
     private static async Task<T> RunWithLanguageAsync<T>(
         ModelPool pool, string id, string language,

@@ -157,9 +157,11 @@ internal static class Alignment
         Check("a non-wav upload is refused by name", notWav.StatusCode == HttpStatusCode.BadRequest);
 
         // This aligner refuses without one, which is the case the language
-        // guard has to get right: the transcript language reaches the model
-        // only because the family declares the option, and dropping it the way
-        // a non-declaring family requires would break alignment outright.
+        // guard has to get right: it declares no "language" request option and
+        // needs the transcript language anyway. The two are set separately now,
+        // so the language reaches it whether or not the option is welcome --
+        // while they were one call, serving this family and a strict one like
+        // Parakeet were mutually exclusive.
         var noLanguage = await PostAsync(language: null);
         var noLanguageBody = await noLanguage.Content.ReadAsStringAsync();
         Check("a model that needs a language says so rather than aligning wrongly",

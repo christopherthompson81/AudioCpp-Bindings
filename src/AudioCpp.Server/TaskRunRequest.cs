@@ -127,9 +127,10 @@ internal sealed record TaskRunRequest
             }
         }
 
-        // The transcript language also travels as an option under the CLI, and
-        // through the C ABI it cannot travel any other way — see the route's
-        // language handling.
+        // The transcript language also travels as an option under the CLI. The
+        // route decides whether this model tolerates that; the language itself
+        // reaches the transcript either way — see the route's language
+        // handling.
         if (request.Language.Length > 0) request.Options.Remove("language");
 
         return request;
@@ -172,7 +173,13 @@ internal sealed record TaskRunRequest
     }
 
     /// <summary>Applies everything parsed here to a live request.</summary>
-    public void ApplyTo(AudioCppRequest task, string language)
+    /// <param name="optionLanguage">
+    /// The language that may also travel as the "language" request option —
+    /// empty for a model that has been seen to refuse it. The transcript
+    /// language comes from <see cref="Language"/> either way, since only the
+    /// option was ever the thing a strict family objected to.
+    /// </param>
+    public void ApplyTo(AudioCppRequest task, string optionLanguage)
     {
         if (Audio is { } audio) task.SetAudio(audio.Samples, audio.SampleRate, audio.Channels);
         if (VoiceReference is { } voice)
@@ -180,7 +187,8 @@ internal sealed record TaskRunRequest
             task.SetVoiceAudio(voice.Samples, voice.SampleRate, voice.Channels);
         }
         if (VoiceId.Length > 0) task.SetVoiceId(VoiceId);
-        if (Text.Length > 0 || language.Length > 0) task.SetText(Text, language);
+        if (Text.Length > 0 || optionLanguage.Length > 0) task.SetText(Text, optionLanguage);
+        if (Language.Length > 0) task.SetTextLanguage(Language);
 
         if (StyleLanguage.Length > 0) task.SetStyleLanguage(StyleLanguage);
         if (Emotion.Length > 0) task.SetEmotion(Emotion);

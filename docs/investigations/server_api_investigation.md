@@ -318,3 +318,32 @@ The settings check already did this for itself; the pattern was there and the
 new code did not follow it. Worth noting that the failure only appeared because
 the checks were run twice in a row — a single run is not enough to catch a
 check that pollutes its own inputs.
+
+## Run 9 — 2026-09-14 — the ABI gap from Run 5 is closed
+
+Runs 2, 4 and 5 all ended at the same wall: `audiocpp_request_set_text` writes
+`options["language"]` as well as the transcript language, the two cannot be
+separated through the C ABI, and the reference server only manages it by
+reaching around the ABI (`drop_unsupported_language_option`). Run 5 concluded
+"a C ABI client cannot write that function."
+
+It can now. Upstream merged
+[0xShug0/audio.cpp#544](https://github.com/0xShug0/audio.cpp/pull/544), which
+adds `audiocpp_request_set_text_language`, and the pin has moved onto it.
+
+What that changes for the conclusions recorded above:
+
+- The learned-refusal machinery (Run 4) **stays**. Whether a model wants the
+  `language` *option* still cannot be asked in advance — Parakeet refuses it,
+  the Qwen3 aligner does not declare it and needs the language anyway — so
+  sending it once and remembering a refusal is still the only thing that serves
+  both.
+- What it stops costing is the transcript language. Run 4 accepted that a model
+  which does not declare the option "gets no transcript language either." That
+  trade is gone: every route sets the transcript language unconditionally and
+  only the option is withdrawn on refusal.
+- The live transcription route was worse than recorded here — it set empty text
+  purely to carry a language, which sent the option as a side effect, and has no
+  retry harness to recover. `?language=` against a strict family simply failed.
+
+See `abi_task_vocabulary_investigation.md` for the pin move and the verification.
