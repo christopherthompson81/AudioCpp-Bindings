@@ -182,39 +182,39 @@ internal static class Streamed
 
             Spread("transcript deltas", deltas, totalMs, Check);
 
-            // Whether a delta is an increment or the running total is the
-            // model's business -- the route forwards what the model emitted,
-            // as upstream does. What must hold either way is that the stream
-            // agrees with its own ending: a delta that is neither a piece of
-            // the final transcript nor a prefix of it means the route mixed up
-            // two runs or dropped part of one.
+            // A delta is an increment. This used to accept either that or the
+            // running total, because two families restated the whole
+            // transcript every time and nothing in the event said which shape
+            // a client was looking at -- reported as #68 here, fixed upstream
+            // in 0xShug0/audio.cpp#552, where every streaming ASR family now
+            // publishes through one shared publisher.
+            //
+            // Two things have to hold for this to pass, and it is worth being
+            // clear which. The engine must publish increments: a family that
+            // went back to restating the total would send text the finalized
+            // transcript does not extend, so the route would add no closing
+            // delta and the concatenation would overshoot. And the route must
+            // send the closing delta, or the concatenation stops one window
+            // short of the end.
+            //
+            // What it cannot distinguish is *where* the last increment came
+            // from -- the engine's own final partial, or the route filling in
+            // for finalize() returning a result rather than an event. There is
+            // nothing in the stream that says, and no assertion here could
+            // tell them apart.
             if (final is not null && deltas.Length > 0)
             {
                 var whole = Normalize(final.Json.GetProperty("text").GetString() ?? "");
-                var texts = deltas
-                    .Select(d => Normalize(d.Json.GetProperty("delta").GetString() ?? ""))
-                    .ToArray();
+                // Concatenated raw and normalized once, not normalized one by
+                // one: the space between two words falls inside whichever
+                // delta carries it, so trimming each in turn would weld the
+                // words either side together and report a failure the stream
+                // does not have.
+                var joined = Normalize(string.Concat(
+                    deltas.Select(d => d.Json.GetProperty("delta").GetString() ?? "")));
 
-                var cumulative = texts.All(t => whole.StartsWith(t, StringComparison.Ordinal));
-                var incremental = Normalize(string.Concat(texts)) == whole;
-                Check("the stream agrees with the transcript it ends on",
-                      cumulative || incremental,
-                      cumulative ? "each delta is the running total"
-                                 : incremental ? "deltas are increments"
-                                 : texts[^1]);
-
-                // Growing monotonically, in the cumulative case. A stream that
-                // went backwards would be re-decoding rather than extending,
-                // and a client rendering it would flicker.
-                if (cumulative && texts.Length > 1)
-                {
-                    var grows = true;
-                    for (var i = 1; i < texts.Length; i++)
-                    {
-                        if (!texts[i].StartsWith(texts[i - 1], StringComparison.Ordinal)) grows = false;
-                    }
-                    Check("and each running total extends the one before it", grows);
-                }
+                Check("the deltas concatenate to the transcript the stream ends on",
+                      joined == whole, joined);
             }
 
             var offline = await PostAsync("/v1/audio/transcriptions", new
@@ -287,6 +287,21 @@ internal static class Streamed
                       liveFinal?.Json.GetProperty("text").GetString() ?? "(none)");
                 Check("and terminates with [DONE]", liveDone);
                 Spread("live deltas", liveDeltas, liveTotal, Check);
+
+                // The same contract on the live route. It runs the session
+                // differently enough -- fed from a pipe, finalized by the
+                // client closing the body rather than by the push loop running
+                // out of clip -- that a family or a route change could satisfy
+                // one path and not the other.
+                if (liveFinal is not null && liveDeltas.Length > 0)
+                {
+                    var liveJoined = Normalize(string.Concat(
+                        liveDeltas.Select(d => d.Json.GetProperty("delta").GetString() ?? "")));
+                    Check("live deltas concatenate to the live transcript",
+                          liveJoined
+                              == Normalize(liveFinal.Json.GetProperty("text").GetString() ?? ""),
+                          liveJoined);
+                }
 
                 // The same recording through the file-backed stream, so the
                 // transport is the only thing that differs. A live path that
