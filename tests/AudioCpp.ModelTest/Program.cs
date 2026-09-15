@@ -195,6 +195,30 @@ internal static class Program
                   "setting the option twice did not leave the second list");
         }
 
+        // ⚠ THE ASYMMETRY, which is the whole design and is easy to "simplify" away later.
+        // Our own G2P's output is dropped when the vocabulary has no id for it, because nobody
+        // downstream can fix it -- "button" phonemizes to a syllabic mark Kokoro has no token
+        // for. A CALLER'S stream is refused instead, because they can fix it and silence is
+        // actively harmful: canonical IPA writes a diphthong as two symbols where Kokoro writes
+        // one, so dropping the off-glide renders "like" as "lack" with no error at all.
+        using (var request = new AudioCppRequest())
+        {
+            request.SetText("I like it", "en-us");
+            request.SetVoiceId("af_heart");
+            request.SetOptionArray("phonemes", ["a\u1da6 l\u02c8a\u1da6k \u026at"]);   // canonical IPA off-glide
+            var refused = false;
+            try { using var result = session.Run(request); }
+            catch (AudioCppException error)
+            {
+                refused = error.Message.Contains("\u1da6", StringComparison.Ordinal);
+            }
+            Check(refused, "a supplied stream with an out-of-vocabulary symbol was accepted and silently degraded");
+        }
+
+        // ...and the leniency our own G2P depends on must survive that strictness.
+        Check(Speak("button", null).Length > 0,
+              "the built-in G2P stopped tolerating a symbol its own output contains");
+
         // An undeclared list key must be rejected by the same contract that rejects an undeclared
         // scalar one, rather than silently ignored.
         using (var request = new AudioCppRequest())
