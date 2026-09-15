@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Linq;
 using AudioCpp.Server;
 
 namespace AudioCpp.ServerTest;
@@ -207,6 +208,29 @@ internal static class Transcription
         Check("a language the model may not declare does not break the request",
               withLanguage.StatusCode == HttpStatusCode.OK,
               await withLanguage.Content.ReadAsStringAsync() is var lb && lb.Length > 120 ? lb[..120] : lb);
+
+        // A 200 alone does not say *how* it succeeded: a model that accepts the
+        // option and one that refuses it and is retried without it look the
+        // same from outside. Against a strict family the refusal is the path
+        // being exercised, and only the log distinguishes them -- so assert on
+        // it rather than leaving the interesting half of the behaviour
+        // unobserved. Skipped for a model that declares the option, where no
+        // refusal is expected and its absence proves nothing.
+        var refusalLogged = server.Log.Any(
+            line => line.Contains("refuses the 'language' request option", StringComparison.Ordinal));
+        if (refusalLogged)
+        {
+            Check("the refusal is reported once, not silently absorbed",
+                  server.Log.Count(
+                      line => line.Contains("refuses the 'language' request option",
+                                            StringComparison.Ordinal)) == 1,
+                  string.Join(" | ", server.Log.TakeLast(4)));
+        }
+        else
+        {
+            Console.WriteLine("  note  this model accepts the 'language' option; "
+                              + "the refusal path was not exercised");
+        }
 
         await server.StopAsync();
         Console.WriteLine(failures == 0 ? "transcription OK" : $"transcription: {failures} failure(s)");
