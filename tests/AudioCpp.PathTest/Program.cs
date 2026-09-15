@@ -81,6 +81,8 @@ internal static class Program
                 }
             }
 
+            CheckOptionArrayContract();
+
             var session = model.CreateSession("vad", "offline", backend);
             Check(session.Family.Length > 0, "session reports no family");
 
@@ -157,6 +159,46 @@ internal static class Program
             spans.Add((segment.StartSample, segment.EndSample));
         }
         return spans;
+    }
+
+    /// <summary>
+    /// The argument contract of <see cref="AudioCppRequest.SetOptionArray"/>, which is a list
+    /// transport over an ABI whose option map is string-to-string.
+    ///
+    /// <para>
+    /// Model-free on purpose: whether the VALUES reach a family is that family's test, but
+    /// whether a malformed call is rejected cleanly belongs with the rest of the ABI contract —
+    /// and these are the calls a garbage-collected caller is most likely to get wrong, since it
+    /// has to pin an array of pointers into managed memory to make them at all.
+    /// </para>
+    /// </summary>
+    private static void CheckOptionArrayContract()
+    {
+        using var request = new AudioCppRequest();
+
+        // The ordinary case, and an empty list -- which sets an EMPTY list rather than
+        // being a no-op, and so must be accepted rather than rejected as "nothing to set".
+        request.SetOptionArray("phonemes", ["one", "two", "three"]);
+        request.SetOptionArray("phonemes", []);
+
+        // Replace, not append: two calls leave the second list, so a caller correcting a
+        // mistake gets what it asked for rather than both attempts concatenated. Not
+        // observable from here without a family that reads it, so this asserts only that the
+        // repeat is accepted; AudioCpp.ModelTest checks the value that survives.
+        request.SetOptionArray("phonemes", ["first"]);
+        request.SetOptionArray("phonemes", ["second"]);
+
+        // Unicode has to survive the marshalling: these are phoneme strings in practice, and
+        // every interesting one is non-ASCII.
+        request.SetOptionArray("phonemes", ["\u00f0\u0259 h\u02c8\u0251\u0279b\u025a", "\u02c8\u00e6fr\u0131k\u0259"]);
+
+        // A null element must be refused rather than marshalled as a null pointer, and refused
+        // BEFORE anything is written, so the option cannot be left half-assigned.
+        Assert.Throws<ArgumentException>(() => request.SetOptionArray("phonemes", ["ok", null!]));
+        Assert.Throws<ArgumentNullException>(() => request.SetOptionArray("phonemes", null!));
+        Assert.Throws<ArgumentNullException>(() => request.SetOptionArray(null!, ["x"]));
+
+        Console.WriteLine("option arrays: contract ok");
     }
 
     private static void RunStreaming(
