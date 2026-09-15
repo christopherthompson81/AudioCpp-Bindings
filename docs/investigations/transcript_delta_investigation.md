@@ -301,3 +301,75 @@ while the cause was which branch was checked out.
   compilation and the helper's tests, and `nemotron_asr` plus the two
   `vibevoice_asr` chunk-append sites take deltas produced upstream and were left
   alone.
+
+## Run 7 — 2026-09-15 — actually running the six migrated families
+
+Six of the seven migrations rested on compilation and reading. Installed each
+family's cheapest package and drove it through the CLI on the same clip.
+
+| family | package | size | partials | concat == text_output |
+| --- | --- | --- | --- | --- |
+| `kroko_asr` | community q8_0 | 168 MB | 11 | after a fix — see below |
+| `sense_asr` | SenseVoice-Small q8 | 254 MB | 1 | yes |
+| `qwen3_asr` | 0.6B q8_0 | 1.2 GB | 1 | yes |
+| `voxtral_realtime` | Mini-4B q4_k | 3.1 GB | 33 | yes |
+| `higgs_audio_stt` | v3-STT q8_0 | 3.2 GB | 4 | yes |
+| `vibevoice_asr_streaming` | 7B q4_k | 5.9 GB | pending | pending |
+
+`voxtral_realtime` is the most valuable of these: 33 token-level partials
+(`' Some'`, `' call'`, `' me'`, `' nature'`, `'.'`, …), so the publisher is
+exercised once per token rather than once per window. `sense_asr` and `qwen3_asr`
+are the weakest — the whole clip fits one window, so one partial goes out and the
+diff never runs twice.
+
+### kroko_asr's final result depended on the bug
+
+Running it is the only reason this was found. The partials came out correctly as
+eleven increments, and `text_output` came out as `" times longer than you"` —
+the last increment alone. `finalize()` was:
+
+```cpp
+auto event = process_streaming_audio(true);
+result.text_output = event.partial_text;
+```
+
+It read the whole transcript out of the partial, which worked only because the
+partial restated the whole transcript every time. Fixing the partial broke the
+final result, and **nothing in the types or the compiler noticed**: both are
+`std::optional<Transcript>`, so the code is equally valid before and after.
+
+Confirmed it was my change rather than a pre-existing fault by checking out
+`origin/main`'s copy of the two kroko files, rebuilding, and re-running: baseline
+emitted eleven copies of a growing transcript *and* a correct `text_output`. So
+the baseline run served double duty — it confirmed the diagnosis of kroko as a
+second instance of #68, and proved the regression was mine.
+
+`finalize()` now builds its result from `combined_decoded()` through
+`make_result()`, the same path the offline route already uses, which also
+supplies the speech segments and word timestamps it had been assembling by hand.
+
+Swept for the same shape elsewhere:
+
+```
+$ grep -rn "text_output = .*partial_text" src/ --include=*.cpp
+src/capi/audiocpp.cpp:226:    result.text_output = std::move(event.partial_text);
+```
+
+That one is correct and intended — it presents a stream *event's* partial through
+the event's own text accessor, which is what a delta is — and it is documented as
+such in the comment above it. No other family reads its final transcript out of a
+partial.
+
+### Two process notes
+
+`model_manager_v2.py` buffers its output, so a download in progress looks
+identical to one that never started. I read an empty log as a failed start and
+launched a second copy of the 5.9 GB vibevoice download; both ran, each into its
+own staging directory. Killed the newer, removed its orphan, kept the older.
+Check `ps` and the staging directory's size, not the log, to tell a slow download
+from a dead one.
+
+Also lost a download to a backgrounded `( ... ) & ( ... ) & wait` where only the
+first subshell inherited the `cd` — the second failed with
+`can't open file '.../AudioCpp-Bindings/tools/model_manager_v2.py'`. Absolute
+paths in backgrounded subshells.
