@@ -187,10 +187,21 @@ internal static class Streamed
             // transcript every time and nothing in the event said which shape
             // a client was looking at -- reported as #68 here, fixed upstream
             // in 0xShug0/audio.cpp#552, where every streaming ASR family now
-            // publishes through one shared publisher. The route still forwards
-            // what the model emitted, so this asserts the engine's contract
-            // rather than anything the route does: a family that went back to
-            // restating the total would fail here, which is the point.
+            // publishes through one shared publisher.
+            //
+            // Two things have to hold for this to pass, and it is worth being
+            // clear which. The engine must publish increments: a family that
+            // went back to restating the total would send text the finalized
+            // transcript does not extend, so the route would add no closing
+            // delta and the concatenation would overshoot. And the route must
+            // send the closing delta, or the concatenation stops one window
+            // short of the end.
+            //
+            // What it cannot distinguish is *where* the last increment came
+            // from -- the engine's own final partial, or the route filling in
+            // for finalize() returning a result rather than an event. There is
+            // nothing in the stream that says, and no assertion here could
+            // tell them apart.
             if (final is not null && deltas.Length > 0)
             {
                 var whole = Normalize(final.Json.GetProperty("text").GetString() ?? "");
@@ -277,9 +288,10 @@ internal static class Streamed
                 Check("and terminates with [DONE]", liveDone);
                 Spread("live deltas", liveDeltas, liveTotal, Check);
 
-                // The same increment contract on the live route. It runs the
-                // session differently enough -- fed from a pipe, finalized by
-                // the client closing the body -- that a family could satisfy
+                // The same contract on the live route. It runs the session
+                // differently enough -- fed from a pipe, finalized by the
+                // client closing the body rather than by the push loop running
+                // out of clip -- that a family or a route change could satisfy
                 // one path and not the other.
                 if (liveFinal is not null && liveDeltas.Length > 0)
                 {

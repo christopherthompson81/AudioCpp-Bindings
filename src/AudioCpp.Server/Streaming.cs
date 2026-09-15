@@ -166,10 +166,13 @@ internal static class Streaming
         double? ttft = null;
         Sse? sse = null;
         var final = "";
-        var sent = new StringBuilder();
 
         await pool.UseStreamingAsync(request.Model, async session =>
         {
+            // Scoped to the run, unlike `final`, which the done event needs
+            // after it: nothing outside reads what was sent.
+            var sent = new StringBuilder();
+
             // A streaming ASR session is fed, not handed a clip. Attaching the
             // audio to the request the way the offline path does gets as far as
             // finalize() and then fails with "requires streamed audio" -- the
@@ -394,10 +397,10 @@ internal static class Streaming
         double? ttft = null;
         var final = "";
         Sse? sse = null;
-        var sent = new StringBuilder();
 
         await pool.UseStreamingAsync(id, async session =>
         {
+            var sent = new StringBuilder();
             using var contract = new AudioCppRequest();
             contract.SetAudio(new float[1], format.SampleRate, format.Channels);
             // The transcript language alone, not the "language" request option.
