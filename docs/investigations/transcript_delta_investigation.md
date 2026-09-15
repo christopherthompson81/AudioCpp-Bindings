@@ -226,3 +226,78 @@ convention to check against — the reasoning had to come from the field's own u
   *neither* UTF-8 guard, and `emit_transcript_delta` is duplicated between it and
   `higgs_audio_stt`. A shared, correct helper is the actual root-cause fix for
   #68 — this PR fixes the one family that was caught.
+
+## Run 6 — 2026-09-15 — widening to the root cause
+
+Question: if parakeet got this wrong, what stopped every other family getting it
+wrong too? Answer: nothing. That is the actual defect.
+
+Swept every `partial_text` assignment in the tree rather than the `src/models/`
+subset Run 2 looked at — which is how the first sweep missed two families, both
+in `community_models/`:
+
+```
+$ grep -rn "partial_text = " src/ --include=*.cpp
+community_models/sense_asr/session.cpp:762     published-bytes offset
+community_models/kroko_asr/session.cpp:906     event.partial_text = result.text_output
+community_models/parakeet_tdt/session.cpp      (the Run 4 fix)
+models/higgs_audio_stt/session.cpp:71,344      common-prefix diff + chunk deltas
+models/vibevoice_asr/session.cpp:146,825,1205  common-prefix diff + chunk deltas
+models/voxtral_realtime/session.cpp:505        published-bytes offset
+models/qwen3_asr/session.cpp:623               published-bytes offset
+models/nemotron_asr/session.cpp:464            decoder-native delta
+```
+
+**`kroko_asr` is a second instance of #68's bug**, never reported:
+
+```cpp
+const auto decoded = combined_decoded();
+const auto result = make_result(decoded, ...);
+event.partial_text = result.text_output;   // everything decoded so far
+```
+
+Identical shape to parakeet, including the cumulative `word_timestamps`
+alongside. It would have survived the Run 4 fix untouched. Found by looking for
+the pattern, not by running it — I have no kroko weights.
+
+Three implementations of one idea across seven families: a common-prefix diff
+duplicated *verbatim* (helper and caller both) in `higgs_audio_stt` and
+`vibevoice_asr`; a published-bytes offset open-coded three times; and two
+families doing no diffing at all. None of the five that did diff handled UTF-8.
+
+### The fix
+
+`engine::runtime::PartialTextPublisher` — one implementation, seven callers, and
+`streaming_published_bytes_` gone from the tree entirely. Unit tested at
+`tests/unittests/test_partial_text.cpp`, which the pre-fix logic fails on the
+byte-fallback cases.
+
+### Two mistakes of my own worth keeping
+
+**A substring guard that matched the wrong thing.** The migration script skipped
+adding the include when `'partial_text.h' not in s` — which matched
+`event.partial_text.has_value()` in `vibevoice_asr`, so that file silently went
+without its include. It compiled anyway (transitively included), which is how a
+bug like this survives; caught by grepping the result rather than trusting the
+script's own report.
+
+**Running the bindings suite from the wrong branch.** First run failed with four
+`NOT BOUND` entry points, which looked like the refactor breaking the ABI. It
+was `transcript-delta-investigation` checked out — that branch is cut from
+`main` and does not carry the `abi-task-vocabulary` bindings. Re-run from the
+right branch: green across five families, C and C# agreeing on every value.
+Worth recording because the failure named the ABI and pointed at the engine,
+while the cause was which branch was checked out.
+
+## Outcome (final)
+
+- Three commits on `fix/transcript-delta-increments`: the family fix, the review
+  fix, and the shared publisher.
+- Fork PR christopherthompson81/audio.cpp#6, retitled for the wider scope.
+- The follow-up this log kept naming — `vibevoice_asr`'s missing UTF-8 guards and
+  the duplicated `emit_transcript_delta` — is no longer a follow-up; it is the
+  third commit.
+- Still open: only `parakeet_tdt` was run end to end, six migrations rest on
+  compilation and the helper's tests, and `nemotron_asr` plus the two
+  `vibevoice_asr` chunk-append sites take deltas produced upstream and were left
+  alone.
