@@ -142,3 +142,87 @@ text at all when a window decodes nothing new:
   UTF-8 splitting bug, and `emit_transcript_delta` is duplicated between it and
   `higgs_audio_stt` — a shared helper would stop the next family getting this
   wrong, which is the actual root cause of #68.
+
+## Run 5 — 2026-09-15 — reviewing the fix, and finding it half right
+
+Question: does the UTF-8 handling in Run 4 actually do what its comment claims?
+
+It does not. The backoff guards the point where the diff *diverges* — the start
+of a delta — and nothing bounds the end. Traced by hand:
+
+```
+emitted_text_ = "abc"
+decoded.text  = "abc\xE4"        (a 3-byte character, one byte so far)
+
+common_prefix_size -> 3
+rhs[3] = 0xE4, and 0xE4 & 0xC0 == 0xC0, not 0x80
+    -> not a continuation byte, so nothing is backed off
+emit decoded.text.substr(3) = "\xE4"
+```
+
+A bare lead byte goes out as the delta, which is invalid UTF-8 by the time it
+reaches the SSE JSON. The comment in Run 4 claimed this case was covered; it
+covered the opposite one. The likelier trigger is the end of a decode, not a
+revision, because the tokenizer falls back to bytes for text its vocabulary does
+not cover — so this was the more reachable of the two and the one that was
+missed.
+
+Fixed with `complete_utf8_end`, bounding a delta at the last complete sequence,
+and `emitted_text_` now records what actually *went out* rather than the whole
+decode, so a held-back character is reconsidered against the window that
+completes it instead of being skipped. Nothing is lost if a stream ends with a
+character still held: `finalize()` reports the full `text_output` regardless.
+
+Exercised by replaying decode sequences through the two helpers:
+
+```
+  ok    ascii growth                       got=Some call me nature. Others
+  ok    byte-fallback char assembled       got=ab一
+  ok    incomplete tail held back          got=ab
+  ok    cyrillic growth                    got=При
+  ok    shrink is a no-op                  got=abcdef
+  note  revision yields: Some call me natone called me
+```
+
+The old code fails `byte-fallback char assembled` by emitting a lone `\xE4`.
+
+### A claim that needed walking back
+
+That `note` line is the second finding. Run 4 justified the diff over a byte
+counter by saying a counter "would silently corrupt the stream on a revision"
+while the diff "re-sends from the divergence point" — which reads as though the
+diff makes revisions safe. It does not. An append-only protocol cannot retract,
+so on a real revision the client's transcript is wrong under either scheme; the
+diff bounds the damage to the diverged tail rather than repairing it. The PR now
+says so with the replay output as evidence, because the original phrasing would
+have let a reviewer merge it believing revisions were handled.
+
+Whether parakeet revises at all is still open. `decode_text` is
+`tokenizer->decode_ids()` over an append-only token list, which is prefix-stable
+for ordinary detokenization; the reachable exception is byte-fallback, where a
+completed character can replace bytes already published. Not observed in any run
+here — every partial on the English sample was a pure extension.
+
+### The other asymmetry
+
+`partial_text` is now incremental while `word_timestamps` in the same event
+stays cumulative. Checked whether that is a defect introduced by this change:
+it is not. `word_timestamps` is not a delta field — it is the finalized set so
+far, which is why the provisional last word is popped. Before the fix both
+fields were cumulative and accidentally consistent; now each matches its own
+contract and they differ. Commented in place rather than "fixed", since making
+word timestamps incremental would break the one thing that field is for.
+
+No other streaming family emits `word_timestamps` at all, so there was no
+convention to check against — the reasoning had to come from the field's own use.
+
+## Outcome (revised)
+
+- Two commits on `fix/transcript-delta-increments`: the fix, and a review fix on
+  the fix.
+- Fork PR christopherthompson81/audio.cpp#6, body corrected to stop overstating
+  what the diff buys.
+- Follow-up still worth filing: `vibevoice_asr`'s `common_prefix_size` has
+  *neither* UTF-8 guard, and `emit_transcript_delta` is duplicated between it and
+  `higgs_audio_stt`. A shared, correct helper is the actual root-cause fix for
+  #68 — this PR fixes the one family that was caught.
