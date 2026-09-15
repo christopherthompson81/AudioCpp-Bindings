@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using AudioCpp;
 using Microsoft.AspNetCore.Http;
 
@@ -48,6 +49,32 @@ internal static class Streaming
             if (next.IsFinal) break;
         }
     }
+
+    /// <summary>
+    /// The increment a finalized transcript adds to the deltas already sent,
+    /// or an empty string when it does not simply extend them.
+    /// </summary>
+    /// <remarks>
+    /// The last window a streaming ASR decodes is decoded inside finalize(),
+    /// and this ABI hands that back as a result rather than as one more event:
+    /// audiocpp_stream_finish() returns a result and leaves nothing to poll.
+    /// So the closing text reaches a client only in transcript.text.done, and
+    /// a client that appends deltas -- which is what the OpenAI shape this
+    /// mimics tells it to do -- renders a transcript missing its tail for the
+    /// whole of the last window. Visible only since the engine's partials
+    /// became true increments (0xShug0/audio.cpp#552); while they restated the
+    /// running total the last one covered for it.
+    ///
+    /// Empty when the final transcript is not an extension of what was sent.
+    /// A family that revised earlier text cannot be reconciled by appending,
+    /// and inventing a delta there would make the stream disagree with itself
+    /// rather than merely end early. done carries the whole transcript either
+    /// way.
+    /// </remarks>
+    private static string ClosingDelta(string sent, string final) =>
+        final.Length > sent.Length && final.StartsWith(sent, StringComparison.Ordinal)
+            ? final[sent.Length..]
+            : "";
 
     public static async Task SpeechAsync(HttpContext http, ModelPool pool, SpeechRequest request,
                                          ServerConfig config, Action<string> log,
@@ -139,6 +166,7 @@ internal static class Streaming
         double? ttft = null;
         Sse? sse = null;
         var final = "";
+        var sent = new StringBuilder();
 
         await pool.UseStreamingAsync(request.Model, async session =>
         {
@@ -154,13 +182,15 @@ internal static class Streaming
             session.StartStream(contract);
             sse = Sse.Begin(http.Response);
 
-            async Task EmitAsync(AudioCppResult result)
+            async Task SendDeltaAsync(string delta)
             {
-                var delta = result.Text?.Text ?? "";
                 if (delta.Length == 0) return;
+                sent.Append(delta);
                 ttft ??= started.Elapsed.TotalMilliseconds;
                 await sse.SendAsync(new { type = "transcript.text.delta", delta }, cancel);
             }
+
+            Task EmitAsync(AudioCppResult result) => SendDeltaAsync(result.Text?.Text ?? "");
 
             // The engine names the window it wants; pushing in that size avoids
             // it re-buffering. A second is the fallback when it declines to say.
@@ -182,6 +212,7 @@ internal static class Streaming
 
             using var result = session.FinishStream();
             final = result.Text?.Text ?? "";
+            await SendDeltaAsync(ClosingDelta(sent.ToString(), final));
             return 0;
         }, cancel);
 
@@ -363,6 +394,7 @@ internal static class Streaming
         double? ttft = null;
         var final = "";
         Sse? sse = null;
+        var sent = new StringBuilder();
 
         await pool.UseStreamingAsync(id, async session =>
         {
@@ -379,16 +411,20 @@ internal static class Streaming
             session.StartStream(contract);
             sse = Sse.Begin(http.Response);
 
-            await IngestAsync(http, session, format, limits, async result =>
+            async Task SendDeltaAsync(string delta)
             {
-                var delta = result.Text?.Text ?? "";
                 if (delta.Length == 0) return;
+                sent.Append(delta);
                 ttft ??= since.Elapsed.TotalMilliseconds;
                 await sse.SendAsync(new { type = "transcript.text.delta", delta }, cancel);
-            }, since, cancel);
+            }
+
+            await IngestAsync(http, session, format, limits,
+                              result => SendDeltaAsync(result.Text?.Text ?? ""), since, cancel);
 
             using var result = session.FinishStream();
             final = result.Text?.Text ?? "";
+            await SendDeltaAsync(ClosingDelta(sent.ToString(), final));
             return 0;
         }, cancel);
 

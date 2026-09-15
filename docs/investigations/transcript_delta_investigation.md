@@ -507,3 +507,77 @@ When a field looks empty, dump the raw bytes (`cat -A`, `xxd`) before concluding
 anything about the code that produced it. One `cat -A` at the start of Run 8
 would have shown the `\n Speaker 0:` continuation line immediately and saved
 filing two phantom defects.
+
+## Run 10 — 2026-09-15 — adopting the fix downstream, and what it uncovered
+
+Upstream merged #552 as `3b90d6e`, tagged `v0.8.0` (`4af1432`). `include/audiocpp.h`
+is byte-identical between the old pin `5db449e` and `4af1432`, so re-pinning was
+an engine rebuild and no binding change: coverage stays `declared: 73 bound: 73`.
+
+Question: with every streaming ASR family now publishing increments, can the
+server test stop accepting either shape?
+
+`tests/AudioCpp.ServerTest/Streamed.cs` had deliberately asserted only that the
+stream *agreed with its own ending* — either each delta is the running total, or
+they concatenate. Narrowed to the one assertion the engine now guarantees:
+
+```
+the deltas concatenate to the transcript the stream ends on
+```
+
+### The narrowed assertion failed, and it was ours
+
+```
+FAIL  the deltas concatenate to the transcript the stream ends on
+      Some call me nature. Others call meMother Nature. … twenty two thousand five
+```
+
+Two separate defects in one line.
+
+**1. The tail of the transcript never reached the client as a delta.** 6 deltas
+arrived where the CLI reports 7 partials for the same clip. The last window a
+streaming ASR decodes is decoded inside `finalize()`, and this ABI returns that
+as a *result*: `audiocpp_stream_finish()` hands back a `TaskResult` and leaves
+no event to poll. So the closing text was only ever in `transcript.text.done`,
+and a client doing what the OpenAI shape tells it to — append each delta —
+rendered a transcript missing its last window for the whole of that window.
+
+Invisible until now. While partials restated the running total, the last one
+before finalize already contained everything that mattered, so the gap was
+covered by the very bug #68 reported.
+
+Fixed in both routes with `ClosingDelta(sent, final)`: the increment the
+finalized transcript adds to what was sent, or empty when `final` does not
+extend it. Empty rather than a guess, because a family that *revised* earlier
+text cannot be reconciled by appending, and synthesising a delta there would
+make the stream disagree with itself rather than merely end early.
+
+**2. The test's own normalization welded words together.** `Normalize` is
+whitespace-insensitive, and the first version normalized each delta *before*
+concatenating. The space between two words lives inside whichever delta carries
+it — upstream's own example shows `partial_text= Mother Nature. I'` with a
+leading space — so per-delta trimming produced `call meMother` and reported a
+failure the stream did not have. Concatenate raw, normalize once.
+
+The second defect was masking nothing, but it made the first one's evidence
+unreadable: the same line showed both a missing tail and a bogus join.
+
+### After both fixes
+
+```
+ok  text arrives as deltas  7 deltas
+ok  the deltas concatenate to the transcript the stream ends on  …times longer than you.
+ok  live audio produces deltas  5
+ok  live deltas concatenate to the live transcript  …times longer than you.
+```
+
+7 deltas, matching the CLI's partial count for the same clip exactly. Full suite
+against the `v0.8.0` pin with Parakeet TDT + Qwen3 forced aligner: 131
+assertions, 0 failures, exit 0.
+
+### Outcome
+
+- #68 closed: fixed upstream in #552, adopted at the `v0.8.0` pin.
+- The route gap it exposed is fixed here, and is a defect of ours rather than
+  the engine's — worth recording separately, because nothing about #68's report
+  predicted it.
