@@ -103,6 +103,26 @@ SEPARATION_WAV="$SOURCE_ROOT/tests/ace_step/assets/complete_source_demucs_8s.wav
 
 export AUDIOCPP_NATIVE_DIR="$BIN"
 
+# Every stage below runs --no-build, so a test project missing from the solution is
+# never compiled and dies with "No such file or directory" instead of running. That
+# is not hypothetical: AudioCpp.AudioTest was dropped from the solution by an
+# unrelated UI change and stayed silent for weeks, because the stale binary in bin/
+# kept running until someone built from clean. Checked here rather than trusted,
+# since this script is what assumes one build covers every project it then runs.
+missing=""
+for proj in "$BINDINGS_ROOT"/tests/*/*.csproj; do
+    # An unmatched glob expands to itself, which would report a project named "*".
+    [ -e "$proj" ] || continue
+    rel="tests/$(basename "$(dirname "$proj")")/$(basename "$proj")"
+    grep -qF "$rel" "$BINDINGS_ROOT/AudioCpp.slnx" || missing="$missing  $rel"$'\n'
+done
+if [ -n "$missing" ]; then
+    echo "these test projects are not in AudioCpp.slnx, so --no-build cannot run them:"
+    printf '%s' "$missing"
+    echo "add them to the solution, or this script will skip past them with a confusing error."
+    exit 1
+fi
+
 dotnet build "$BINDINGS_ROOT/AudioCpp.slnx" -v q --nologo || exit 1
 
 # Run from the engine's source tree. A family whose GGUF predates the schema-v1
