@@ -48,6 +48,20 @@ cd AudioCpp-Bindings
 ./scripts/build-engine.sh          # add -DENGINE_ENABLE_CUDA=ON, or any other cmake flag
 ```
 
+Two flags are worth knowing for a local rebuild, both opt-in and neither changing
+what is built:
+
+```bash
+./scripts/build-engine.sh --ccache --cuda-arch native -DENGINE_ENABLE_CUDA=ON
+```
+
+`--ccache` sets a ccache launcher for C, C++ *and* CUDA. The engine forces ggml's
+`GGML_CCACHE` off, so without this nothing is cached at all; a launcher already set
+in the environment is left alone. `--cuda-arch native` compiles for this host's GPU
+instead of the portable nine-architecture list, which is most of the cost of a CUDA
+build — and makes the result run on this machine only, so it is for development, not
+for anything shipped.
+
 That builds `libaudiocpp` with the C ABI enabled into `external/audio.cpp/build/bin`,
 where the binding looks for it by default — no environment variable, and no second
 checkout to keep in step. To build against your own audio.cpp instead, point
