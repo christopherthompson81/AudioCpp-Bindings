@@ -2,35 +2,63 @@
 # Runs the C# tests against a built libaudiocpp, and checks that the bindings
 # report exactly what the C tests report for the same models.
 #
-#   ./run-tests.sh [models-root] [threads]
-#   ./run-tests.sh <build-dir> [models-root] [threads]
+#   ./run-tests.sh [models-root] [--backend <name>] [--threads <n>] [--build-dir <dir>]
 #
-# With no build directory it uses the pinned engine build that
-# scripts/build-engine.sh produces, which is the version these tests are
+# The models root is the only argument most runs need; everything else has a
+# default worth having. With no build directory it uses the pinned engine build
+# that scripts/build-engine.sh produces, which is the version these tests are
 # written against.
+#
+# --backend picks the COMPUTE backend both languages are driven with -- cpu by
+# default, cuda/vulkan/hip on a build that has one. Both get the same value so
+# the cross-language diff keeps comparing like with like. (The audio capture
+# test is unaffected: its backend is miniaudio's, not the engine's.)
+#
+# The build directory used to be positional and first, disambiguated from the
+# models root by looking for a CMakeCache.txt. A third positional for the
+# backend would have made that guess carry more weight than a guess should, so
+# the three uncommon arguments are now flags and the common one stayed bare.
 #
 # Exit codes follow CTest: 0 pass, 1 fail, 77 skip.
 set -uo pipefail
 
 BINDINGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENGINE="$BINDINGS_ROOT/external/audio.cpp"
-# The build directory used to be required and first. Now that it defaults to the
-# pinned engine it is usually absent, and the models root -- still the argument
-# that matters -- would otherwise have to be preceded by a path nobody needs to
-# type. A configured build directory always has a CMakeCache.txt and a models root
-# never does, so which was meant is decidable rather than guessed. Both the old
-# two-argument form and the short form work, and the choice is printed.
-if [ -n "${1:-}" ] && [ ! -f "$1/CMakeCache.txt" ]; then
-    set -- "$ENGINE/build" "$@"
-    echo "using the pinned engine build; treating $2 as the models root"
-fi
-BUILD_DIR="${1:-$ENGINE/build}"
+
+MODELS_ROOT=""
+BUILD_DIR=""
+BACKEND="cpu"
+THREADS=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --backend)   [ $# -ge 2 ] || { echo "--backend needs a name (cpu, cuda, ...)" >&2; exit 1; }
+                     BACKEND="$2"; shift 2 ;;
+        --backend=*) BACKEND="${1#*=}"; shift ;;
+        --threads)   [ $# -ge 2 ] || { echo "--threads needs a count" >&2; exit 1; }
+                     THREADS="$2"; shift 2 ;;
+        --threads=*) THREADS="${1#*=}"; shift ;;
+        --build-dir)   [ $# -ge 2 ] || { echo "--build-dir needs a path" >&2; exit 1; }
+                       BUILD_DIR="$2"; shift 2 ;;
+        --build-dir=*) BUILD_DIR="${1#*=}"; shift ;;
+        -h|--help)   sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -*)          echo "unknown option: $1" >&2; exit 1 ;;
+        *)
+            # The old form put the build directory here, so say which flag it moved
+            # to rather than failing as "models root not found" on a path that exists.
+            if [ -f "$1/CMakeCache.txt" ]; then
+                echo "$1 looks like a build directory; pass it as --build-dir $1" >&2
+                exit 1
+            fi
+            [ -z "$MODELS_ROOT" ] || { echo "unexpected argument: $1" >&2; exit 1; }
+            MODELS_ROOT="$1"; shift ;;
+    esac
+done
+BUILD_DIR="${BUILD_DIR:-$ENGINE/build}"
 if [ ! -d "$BUILD_DIR" ]; then
     echo "no engine build at $BUILD_DIR"
     echo "build the pinned engine first: ./scripts/build-engine.sh"
     exit 77
 fi
-MODELS_ROOT="${2:-}"
 # Resolved before the cd below. Left relative it would resolve against the engine's
 # source tree, and a models root that is merely in the wrong place reports "no
 # models" and exits 77 -- a skip, which reads as green.
@@ -44,7 +72,7 @@ fi
 # Separation dominates the wall time and scales with threads; results are
 # unaffected by the count. Both languages get the same number so the
 # cross-language diff compares like with like.
-THREADS="${3:-$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) )}"
+THREADS="${THREADS:-$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) )}"
 # Multi-config generators -- Visual Studio, Xcode, Ninja Multi-Config -- put
 # outputs in a per-configuration subdirectory, so bin/ alone finds nothing on a
 # tree where the library is sitting right there. That reads as "not applicable"
@@ -172,7 +200,7 @@ capture_status=$?
 echo
 echo "== C# path test =="
 run tests/AudioCpp.PathTest/AudioCpp.PathTest.csproj \
-    "$VAD_MODEL" "$SAMPLE_WAV" cpu
+    "$VAD_MODEL" "$SAMPLE_WAV" "$BACKEND"
 path_status=$?
 [ $path_status -ne 0 ] && [ $path_status -ne 77 ] && exit 1
 
@@ -188,7 +216,7 @@ echo "== C# model test =="
 cs_out="$(mktemp)"
 trap 'rm -f "$cs_out" "${c_out:-}"' EXIT
 run tests/AudioCpp.ModelTest/AudioCpp.ModelTest.csproj \
-    "$MODELS_ROOT" "$SAMPLE_WAV" cpu \
+    "$MODELS_ROOT" "$SAMPLE_WAV" "$BACKEND" \
     "$SEPARATION_WAV" "$THREADS" | tee "$cs_out"
 model_status=${PIPESTATUS[0]}
 [ $model_status -ne 0 ] && [ $model_status -ne 77 ] && exit 1
@@ -206,7 +234,7 @@ fi
 echo
 echo "== C vs C# =="
 c_out="$(mktemp)"
-"$C_MODEL_TEST" "$MODELS_ROOT" "$SAMPLE_WAV" cpu \
+"$C_MODEL_TEST" "$MODELS_ROOT" "$SAMPLE_WAV" "$BACKEND" \
     "$SEPARATION_WAV" "$THREADS" 2>/dev/null \
     | grep '^parity:' | sort > "$c_out"
 grep '^parity:' "$cs_out" | sort > "$cs_out.sorted" && mv "$cs_out.sorted" "$cs_out"
