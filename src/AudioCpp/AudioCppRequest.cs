@@ -203,6 +203,11 @@ public sealed class AudioCppRequest : SafeHandle
     /// thing from never setting the key at all.
     /// </para>
     /// <para>
+    /// Needs ABI minor 2 or later — the entry point does not exist in an engine older than
+    /// that, where this throws <see cref="EntryPointNotFoundException"/> rather than reporting
+    /// a status, since only the major version is checked when a registry is created.
+    /// </para>
+    /// <para>
     /// The ABI copies both the array and the strings, so nothing here has to outlive the call —
     /// which is why the pinned buffers are freed in a finally rather than kept alive by the
     /// request.

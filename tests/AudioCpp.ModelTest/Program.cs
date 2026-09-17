@@ -120,11 +120,12 @@ internal static class Program
     ///
     /// <para>
     /// Kokoro's <c>phonemes</c> is the only family that reads one today. The option set a model
-    /// declares is embedded in its GGUF at conversion time, so a package built before the option
-    /// existed will not accept it — hence the declaration probe and the skip, rather than a
-    /// failure that only means "your model is older than this test". Point
-    /// <c>AUDIOCPP_KOKORO_SPEC</c> at a spec that declares it to exercise this against such a
-    /// package.
+    /// declares is embedded in its GGUF at conversion time and a published package cannot be
+    /// edited in place, so the engine drops the key from its VALIDATION COPY when the contract
+    /// predates the option — a shipped package takes phonemes it never declared. This therefore
+    /// runs either way and only REPORTS which side it ran, because skipping on the declaration
+    /// would skip on the package everyone actually has. Point <c>AUDIOCPP_KOKORO_SPEC</c> at
+    /// <c>model_specs/kokoro_tts.json</c> to run the declared side.
     /// </para>
     ///
     /// <para>
@@ -141,17 +142,18 @@ internal static class Program
             return;
         }
 
-        var specOverride = Environment.GetEnvironmentVariable("AUDIOCPP_KOKORO_SPEC") ?? "";
-        var config = new ModelConfig("kokoro_tts") { ModelSpecOverride = specOverride };
+        // NULL, not "": the ABI reads an empty override as a path, and rejects it as a path
+        // that does not exist. Only a missing setting means "use the package's own spec".
+        var specOverride = Environment.GetEnvironmentVariable("AUDIOCPP_KOKORO_SPEC");
+        var config = new ModelConfig("kokoro_tts")
+        {
+            ModelSpecOverride = string.IsNullOrEmpty(specOverride) ? null : specOverride,
+        };
 
         using var registry = AudioCppRegistry.Create();
         using var model = registry.Load(modelPath, config);
-        if (!model.GetOptions(AudioCppOptionScope.Request).Any(o => o.Name == "phonemes"))
-        {
-            Console.WriteLine("option arrays: this kokoro package does not declare 'phonemes'; skipping "
-                              + "(set AUDIOCPP_KOKORO_SPEC to a spec that does)");
-            return;
-        }
+        var declared = model.GetOptions(AudioCppOptionScope.Request).Any(o => o.Name == "phonemes");
+        Console.WriteLine($"option arrays: package declares a 'phonemes' request option: {(declared ? "yes" : "no")}");
 
         using var session = model.CreateSession("tts", "offline", backend);
         var failuresBefore = _failures;
@@ -164,6 +166,27 @@ internal static class Program
             if (phonemes is not null) request.SetOptionArray("phonemes", phonemes);
             using var result = session.Run(request);
             return result.Audio?.Samples ?? [];
+        }
+
+        // Runs a request that is expected to be refused, handing back the native detail so the
+        // caller can assert WHY -- a rejection for the wrong reason is not the one being tested.
+        bool Refuses(string text, IReadOnlyList<string> phonemes, out string message)
+        {
+            using var request = new AudioCppRequest();
+            request.SetText(text, "en-us");
+            request.SetVoiceId("af_heart");
+            request.SetOptionArray("phonemes", phonemes);
+            try
+            {
+                using var result = session.Run(request);
+                message = "";
+                return false;
+            }
+            catch (AudioCppException error)
+            {
+                message = error.Message;
+                return true;
+            }
         }
 
         // Two readings of the SAME text. If the option were ignored, or if the run cache keyed on
@@ -218,6 +241,28 @@ internal static class Program
         // ...and the leniency our own G2P depends on must survive that strictness.
         Check(Speak("button", null).Length > 0,
               "the built-in G2P stopped tolerating a symbol its own output contains");
+
+        // ⚠ SET-BUT-EMPTY IS NOT UNSET. The ABI's option map cannot tell "no phonemes" from
+        // "an empty list of phonemes" by the key's presence alone, so a caller whose own G2P
+        // stage produced nothing would otherwise have the SOURCE TEXT read aloud with no error
+        // -- the one failure mode a caller cannot detect from the audio. Both shapes are refused:
+        // the whole list empty, and one empty entry among good ones.
+        Check(Refuses("x", [], out var emptyList), "an empty phoneme list was accepted");
+        Check(emptyList.Contains("no entries", StringComparison.OrdinalIgnoreCase),
+              $"an empty list was refused but not for being empty: {emptyList}");
+        Check(Refuses("placeholder", ["həlˈO", ""], out var emptyEntry),
+              "an empty entry beside a good one was accepted");
+        Check(emptyEntry.Contains("entry 1", StringComparison.Ordinal),
+              $"an empty entry was refused without naming which one: {emptyEntry}");
+
+        // A long list must name the offending ENTRY, not just the symbol: "bad symbol R" in a
+        // 200-entry list tells the caller nothing about where to look. The engine sizes every
+        // entry in prepare(), so this is reported before any audio is rendered.
+        var manyChunks = Enumerable.Repeat("həlˈO", 200).Append("R").ToArray();
+        Check(Refuses("placeholder", manyChunks, out var lateEntry),
+              "an out-of-vocabulary symbol in the last entry was accepted");
+        Check(lateEntry.Contains("entry 200", StringComparison.Ordinal),
+              $"a bad entry in a long list was refused without naming which one: {lateEntry}");
 
         // An undeclared list key must be rejected by the same contract that rejects an undeclared
         // scalar one, rather than silently ignored.
