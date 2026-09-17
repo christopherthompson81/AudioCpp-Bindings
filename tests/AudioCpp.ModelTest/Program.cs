@@ -95,6 +95,7 @@ internal static class Program
             {
                 RunCase(testCase, modelsRoot, clip, alternate, backend);
             }
+            CheckSuppliedPhonemes(modelsRoot, backend);
         }
         catch (DllNotFoundException exception)
         {
@@ -111,6 +112,211 @@ internal static class Program
         }
         Console.WriteLine("c# model test OK");
         return 0;
+    }
+
+    /// <summary>
+    /// A list-valued request option, end to end: the values have to reach the family and change
+    /// what it synthesizes, not merely be accepted by the setter.
+    ///
+    /// <para>
+    /// Kokoro's <c>phonemes</c> is the only family that reads one today. The option set a model
+    /// declares is embedded in its GGUF at conversion time and a published package cannot be
+    /// edited in place, so the engine drops the key from its VALIDATION COPY when the contract
+    /// predates the option — a shipped package takes phonemes it never declared. This therefore
+    /// runs either way and only REPORTS which side it ran, because skipping on the declaration
+    /// would skip on the package everyone actually has. Point <c>AUDIOCPP_KOKORO_SPEC</c> at
+    /// <c>model_specs/kokoro_tts.json</c> to run the declared side.
+    /// </para>
+    ///
+    /// <para>
+    /// Emits no <c>parity:</c> lines on purpose: those are diffed against the C test, which does
+    /// not run this.
+    /// </para>
+    /// </summary>
+    private static void CheckSuppliedPhonemes(string modelsRoot, BackendConfig backend)
+    {
+        var modelPath = Path.Combine(modelsRoot, "Kokoro-82M-GGUF", "kokoro-82m-q8_0.gguf");
+        if (!File.Exists(modelPath))
+        {
+            Console.WriteLine("option arrays: no kokoro package; skipping");
+            _skipped++;
+            return;
+        }
+
+        // NULL, not "": the ABI reads an empty override as a path, and rejects it as a path
+        // that does not exist. Only a missing setting means "use the package's own spec".
+        var specOverride = Environment.GetEnvironmentVariable("AUDIOCPP_KOKORO_SPEC");
+        var config = new ModelConfig("kokoro_tts")
+        {
+            ModelSpecOverride = string.IsNullOrEmpty(specOverride) ? null : specOverride,
+        };
+
+        using var registry = AudioCppRegistry.Create();
+        AudioCppModel model;
+        try
+        {
+            model = registry.Load(modelPath, config);
+        }
+        catch (AudioCppException exception)
+        {
+            // Same rule as RunCase: a family this build did not link is a build-time choice,
+            // so it is a skip. Without this the package being on disk while kokoro_tts is not
+            // in the composite throws out of Main -- a stack trace and no summary line.
+            Console.WriteLine($"option arrays: skip (load: {exception.Detail})");
+            _skipped++;
+            return;
+        }
+
+        using var owned = model;
+        var declared = model.GetOptions(AudioCppOptionScope.Request).Any(o => o.Name == "phonemes");
+        Console.WriteLine($"option arrays: package declares a 'phonemes' request option: {(declared ? "yes" : "no")}");
+
+        AudioCppSession session;
+        try
+        {
+            session = model.CreateSession("tts", "offline", backend);
+        }
+        catch (AudioCppException exception)
+        {
+            Console.WriteLine($"option arrays: skip (session: {exception.Detail})");
+            _skipped++;
+            return;
+        }
+
+        using var ownedSession = session;
+        var failuresBefore = _failures;
+
+        float[] Speak(string text, IReadOnlyList<string>? phonemes)
+        {
+            using var request = new AudioCppRequest();
+            request.SetText(text, "en-us");
+            request.SetVoiceId("af_heart");
+            if (phonemes is not null) request.SetOptionArray("phonemes", phonemes);
+            try
+            {
+                using var result = session.Run(request);
+                return result.Audio?.Samples ?? [];
+            }
+            catch (AudioCppException error)
+            {
+                // Every call here is one the engine is supposed to serve, so a refusal is a
+                // failure of THIS test rather than of the run -- reported, with what the
+                // engine said, instead of thrown out of Main as a stack trace.
+                Check(false, $"synthesis was refused: {error.Message}");
+                return [];
+            }
+        }
+
+        // Runs a request that is expected to be refused, handing back the native detail so the
+        // caller can assert WHY -- a rejection for the wrong reason is not the one being tested.
+        bool Refuses(string text, IReadOnlyList<string> phonemes, out string message)
+        {
+            using var request = new AudioCppRequest();
+            request.SetText(text, "en-us");
+            request.SetVoiceId("af_heart");
+            request.SetOptionArray("phonemes", phonemes);
+            try
+            {
+                using var result = session.Run(request);
+                message = "";
+                return false;
+            }
+            catch (AudioCppException error)
+            {
+                message = error.Message;
+                return true;
+            }
+        }
+
+        // Two readings of the SAME text. If the option were ignored, or if the run cache keyed on
+        // text alone, these would come back identical — which is the bug this guards.
+        var first = Speak("record", ["ɹˈɛkɚd"]);
+        var second = Speak("record", ["ɹɪkˈɔɹd"]);
+        Check(first.Length > 0 && second.Length > 0, "supplied phonemes produced no audio");
+        Check(!first.SequenceEqual(second),
+              "two different phoneme lists for the same text produced identical audio");
+
+        // The list is an array, so a caller's own chunking survives: one call over N entries must
+        // equal N calls concatenated, or the merge is not the same operation the text path does.
+        string[] chunks = ["ðə hˈɑɹbɚ wʌz kwˈaɪət", "lˈɔŋ pˈeɪl bˈændz"];
+        var merged = Speak("the harbour was quiet long pale bands", chunks);
+        var joined = chunks.SelectMany(c => Speak("x", [c])).ToArray();
+        Check(merged.SequenceEqual(joined),
+              $"a {chunks.Length}-entry list ({merged.Length} samples) did not match the same "
+              + $"entries rendered separately ({joined.Length} samples)");
+
+        // Replace, not append: PathTest asserts the repeat is accepted, this asserts which one won.
+        using (var request = new AudioCppRequest())
+        {
+            request.SetText("record", "en-us");
+            request.SetVoiceId("af_heart");
+            request.SetOptionArray("phonemes", ["ɹˈɛkɚd"]);
+            request.SetOptionArray("phonemes", ["ɹɪkˈɔɹd"]);
+            using var result = session.Run(request);
+            Check(result.Audio?.Samples.SequenceEqual(second) == true,
+                  "setting the option twice did not leave the second list");
+        }
+
+        // ⚠ THE ASYMMETRY, which is the whole design and is easy to "simplify" away later.
+        // Our own G2P's output is dropped when the vocabulary has no id for it, because nobody
+        // downstream can fix it -- "button" phonemizes to a syllabic mark Kokoro has no token
+        // for. A CALLER'S stream is refused instead, because they can fix it and silence is
+        // actively harmful: canonical IPA writes a diphthong as two symbols where Kokoro writes
+        // one, so dropping the off-glide renders "like" as "lack" with no error at all.
+        Check(Refuses("I like it", ["a\u1da6 l\u02c8a\u1da6k \u026at"], out var offGlide),  // canonical IPA off-glide
+              "a supplied stream with an out-of-vocabulary symbol was accepted and silently degraded");
+        // Separately, because a refusal for some OTHER reason would otherwise be reported as
+        // acceptance -- sending the reader to look for a validation that is in fact present.
+        Check(offGlide.Contains("\u1da6", StringComparison.Ordinal),
+              $"the off-glide was refused, but not for being out of vocabulary: {offGlide}");
+
+        // ...and the leniency our own G2P depends on must survive that strictness.
+        Check(Speak("button", null).Length > 0,
+              "the built-in G2P stopped tolerating a symbol its own output contains");
+
+        // ⚠ SET-BUT-EMPTY IS NOT UNSET. The ABI's option map cannot tell "no phonemes" from
+        // "an empty list of phonemes" by the key's presence alone, so a caller whose own G2P
+        // stage produced nothing would otherwise have the SOURCE TEXT read aloud with no error
+        // -- the one failure mode a caller cannot detect from the audio. Both shapes are refused:
+        // the whole list empty, and one empty entry among good ones.
+        Check(Refuses("x", [], out var emptyList), "an empty phoneme list was accepted");
+        Check(emptyList.Contains("no entries", StringComparison.OrdinalIgnoreCase),
+              $"an empty list was refused but not for being empty: {emptyList}");
+        Check(Refuses("placeholder", ["həlˈO", ""], out var emptyEntry),
+              "an empty entry beside a good one was accepted");
+        Check(emptyEntry.Contains("entry 1", StringComparison.Ordinal),
+              $"an empty entry was refused without naming which one: {emptyEntry}");
+
+        // A long list must name the offending ENTRY, not just the symbol: "bad symbol R" in a
+        // 200-entry list tells the caller nothing about where to look. The engine sizes every
+        // entry in prepare(), so this is reported before any audio is rendered.
+        var manyChunks = Enumerable.Repeat("həlˈO", 200).Append("R").ToArray();
+        Check(Refuses("placeholder", manyChunks, out var lateEntry),
+              "an out-of-vocabulary symbol in the last entry was accepted");
+        Check(lateEntry.Contains("entry 200", StringComparison.Ordinal),
+              $"a bad entry in a long list was refused without naming which one: {lateEntry}");
+
+        // An undeclared list key must be rejected by the same contract that rejects an undeclared
+        // scalar one, rather than silently ignored.
+        using (var request = new AudioCppRequest())
+        {
+            request.SetText("x", "en-us");
+            request.SetVoiceId("af_heart");
+            request.SetOptionArray("not_a_real_option", ["v"]);
+            var rejected = "";
+            try { using var result = session.Run(request); }
+            catch (AudioCppException error) { rejected = error.Message; }
+            Check(rejected.Length > 0, "an undeclared list option was accepted");
+            Check(rejected.Contains("not_a_real_option", StringComparison.Ordinal),
+                  $"an undeclared list option was refused without naming it: {rejected}");
+        }
+
+        _ran++;
+        // ⚠ Reports what happened, not that it ran. An earlier version printed "ok"
+        // unconditionally and said so while two of its own Checks were failing.
+        Console.WriteLine(_failures == failuresBefore
+            ? "option arrays: supplied phonemes ok"
+            : $"option arrays: {_failures - failuresBefore} check(s) FAILED");
     }
 
     private static void RunCase(

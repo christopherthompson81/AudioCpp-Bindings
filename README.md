@@ -138,13 +138,18 @@ touching downloaded models. `./package-macos.sh` builds a real `.app`;
 
 ```bash
 ./scripts/run-tests.sh /path/to/models
+./scripts/run-tests.sh /path/to/models --backend cuda
 ```
 
 Runs both C# tests and then checks the bindings report exactly what audio.cpp's own C
 tests report for the same models — including against the C test binaries from the same
 pinned build, so both languages are driving the same engine. Without a models argument
-it runs only the path test, which needs no downloads. Pass a build directory first to
-test against an engine built somewhere else.
+it runs only the path test, which needs no downloads.
+
+`--backend` picks the compute backend both languages are driven with, `cpu` by default
+and anything the build has otherwise; both get the same one, so the cross-language diff
+keeps comparing like with like. `--threads` and `--build-dir` are there for a thread
+count other than this machine's and for an engine built somewhere else.
 
 ## Notes
 

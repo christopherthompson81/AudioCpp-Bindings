@@ -185,6 +185,10 @@ internal static unsafe partial class NativeMethods
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial AudioCppStatus audiocpp_request_set_option(IntPtr request, string key, string value);
 
+    [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
+    internal static unsafe partial AudioCppStatus audiocpp_request_set_option_array(
+        IntPtr request, string key, byte** values, nuint count);
+
     // ---- result ----------------------------------------------------------
 
     [LibraryImport(Library)]
