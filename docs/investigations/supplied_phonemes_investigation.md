@@ -179,3 +179,43 @@ the pin (`4af1432` → `df0e09e`), the declaration probe (skip → report),
 `ModelSpecOverride` empty → `null`, three new assertions for the post-review
 semantics (empty list, empty entry by index, entry named in a long list), and the
 ABI-minor note on `SetOptionArray`.
+
+## Run 4 — 2026-09-17 — review, and the backend the suite never used
+
+Review of PR #87 at `high` returned five findings, all real, all of the same
+shape: a failure would have been *reported as something other than what it was*.
+The one worth keeping in the log is the off-glide check, which set `refused` only
+when the message named the symbol — so a refusal for any other reason printed
+"accepted and silently degraded", the exact opposite of what happened. A check
+whose failure message can be false is worse than no check, because it sends the
+reader after a bug that is not there.
+
+The embedded-NUL finding was taken as a code fix rather than a test one: the ABI
+builds a `std::string` from the pointer, so a value carrying its own NUL arrived
+truncated and was accepted. Same "set but quietly degraded" shape #577 refuses an
+empty entry for.
+
+### Does any of this hold on the GPU?
+
+`run-tests.sh` drove `cpu` hardcoded in three places, so the answer was unknown.
+Two assertions are byte-exact and were the suspects — an N-entry list equalling
+the same entries rendered separately, and replace-not-append — because upstream's
+`prepare()` sizes the graph on the largest entry, so the merged call and the
+separate calls can build different capacities for the same chunk. On a GPU a
+different capacity can change split and reduction order, and therefore the low
+bits.
+
+It holds. Run on CUDA (RTX 3090, sm_86):
+
+```
+option arrays: package declares a 'phonemes' request option: no
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+option arrays: supplied phonemes ok
+ran=6 skipped=0 failures=0
+C and C# agree on 11 reported values
+```
+
+Bit-identical across two separate CUDA graph warmups, so no tolerance and no
+backend-conditional assertion. `--backend` now makes this a run anyone can ask
+for rather than a hand-written invocation from inside the engine tree.
