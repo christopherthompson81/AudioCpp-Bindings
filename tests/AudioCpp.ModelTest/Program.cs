@@ -139,6 +139,7 @@ internal static class Program
         if (!File.Exists(modelPath))
         {
             Console.WriteLine("option arrays: no kokoro package; skipping");
+            _skipped++;
             return;
         }
 
@@ -151,11 +152,38 @@ internal static class Program
         };
 
         using var registry = AudioCppRegistry.Create();
-        using var model = registry.Load(modelPath, config);
+        AudioCppModel model;
+        try
+        {
+            model = registry.Load(modelPath, config);
+        }
+        catch (AudioCppException exception)
+        {
+            // Same rule as RunCase: a family this build did not link is a build-time choice,
+            // so it is a skip. Without this the package being on disk while kokoro_tts is not
+            // in the composite throws out of Main -- a stack trace and no summary line.
+            Console.WriteLine($"option arrays: skip (load: {exception.Detail})");
+            _skipped++;
+            return;
+        }
+
+        using var owned = model;
         var declared = model.GetOptions(AudioCppOptionScope.Request).Any(o => o.Name == "phonemes");
         Console.WriteLine($"option arrays: package declares a 'phonemes' request option: {(declared ? "yes" : "no")}");
 
-        using var session = model.CreateSession("tts", "offline", backend);
+        AudioCppSession session;
+        try
+        {
+            session = model.CreateSession("tts", "offline", backend);
+        }
+        catch (AudioCppException exception)
+        {
+            Console.WriteLine($"option arrays: skip (session: {exception.Detail})");
+            _skipped++;
+            return;
+        }
+
+        using var ownedSession = session;
         var failuresBefore = _failures;
 
         float[] Speak(string text, IReadOnlyList<string>? phonemes)
@@ -164,8 +192,19 @@ internal static class Program
             request.SetText(text, "en-us");
             request.SetVoiceId("af_heart");
             if (phonemes is not null) request.SetOptionArray("phonemes", phonemes);
-            using var result = session.Run(request);
-            return result.Audio?.Samples ?? [];
+            try
+            {
+                using var result = session.Run(request);
+                return result.Audio?.Samples ?? [];
+            }
+            catch (AudioCppException error)
+            {
+                // Every call here is one the engine is supposed to serve, so a refusal is a
+                // failure of THIS test rather than of the run -- reported, with what the
+                // engine said, instead of thrown out of Main as a stack trace.
+                Check(false, $"synthesis was refused: {error.Message}");
+                return [];
+            }
         }
 
         // Runs a request that is expected to be refused, handing back the native detail so the
@@ -224,19 +263,12 @@ internal static class Program
         // for. A CALLER'S stream is refused instead, because they can fix it and silence is
         // actively harmful: canonical IPA writes a diphthong as two symbols where Kokoro writes
         // one, so dropping the off-glide renders "like" as "lack" with no error at all.
-        using (var request = new AudioCppRequest())
-        {
-            request.SetText("I like it", "en-us");
-            request.SetVoiceId("af_heart");
-            request.SetOptionArray("phonemes", ["a\u1da6 l\u02c8a\u1da6k \u026at"]);   // canonical IPA off-glide
-            var refused = false;
-            try { using var result = session.Run(request); }
-            catch (AudioCppException error)
-            {
-                refused = error.Message.Contains("\u1da6", StringComparison.Ordinal);
-            }
-            Check(refused, "a supplied stream with an out-of-vocabulary symbol was accepted and silently degraded");
-        }
+        Check(Refuses("I like it", ["a\u1da6 l\u02c8a\u1da6k \u026at"], out var offGlide),  // canonical IPA off-glide
+              "a supplied stream with an out-of-vocabulary symbol was accepted and silently degraded");
+        // Separately, because a refusal for some OTHER reason would otherwise be reported as
+        // acceptance -- sending the reader to look for a validation that is in fact present.
+        Check(offGlide.Contains("\u1da6", StringComparison.Ordinal),
+              $"the off-glide was refused, but not for being out of vocabulary: {offGlide}");
 
         // ...and the leniency our own G2P depends on must survive that strictness.
         Check(Speak("button", null).Length > 0,
@@ -271,10 +303,12 @@ internal static class Program
             request.SetText("x", "en-us");
             request.SetVoiceId("af_heart");
             request.SetOptionArray("not_a_real_option", ["v"]);
-            var rejected = false;
+            var rejected = "";
             try { using var result = session.Run(request); }
-            catch (AudioCppException) { rejected = true; }
-            Check(rejected, "an undeclared list option was accepted");
+            catch (AudioCppException error) { rejected = error.Message; }
+            Check(rejected.Length > 0, "an undeclared list option was accepted");
+            Check(rejected.Contains("not_a_real_option", StringComparison.Ordinal),
+                  $"an undeclared list option was refused without naming it: {rejected}");
         }
 
         _ran++;

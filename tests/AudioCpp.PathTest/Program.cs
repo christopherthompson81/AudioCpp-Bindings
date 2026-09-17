@@ -81,8 +81,6 @@ internal static class Program
                 }
             }
 
-            CheckOptionArrayContract();
-
             var session = model.CreateSession("vad", "offline", backend);
             Check(session.Family.Length > 0, "session reports no family");
 
@@ -116,6 +114,21 @@ internal static class Program
             model.Dispose();
             session.Dispose();
             session.Dispose();
+
+            // LAST, and inside its own try. It needs no model, while everything above is the
+            // point of this file -- and both of its failure shapes (Assert.Throws when nothing
+            // throws, EntryPointNotFoundException against an engine older than ABI minor 2)
+            // would otherwise escape to the outer catch and take the dispose-ordering coverage
+            // down with them.
+            try
+            {
+                CheckOptionArrayContract();
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"FAIL: option arrays: {exception.GetType().Name}: {exception.Message}");
+                _failures++;
+            }
         }
         catch (DllNotFoundException exception)
         {
@@ -191,6 +204,12 @@ internal static class Program
         // Unicode has to survive the marshalling: these are phoneme strings in practice, and
         // every interesting one is non-ASCII.
         request.SetOptionArray("phonemes", ["\u00f0\u0259 h\u02c8\u0251\u0279b\u025a", "\u02c8\u00e6fr\u0131k\u0259"]);
+
+        // A value with an embedded NUL must be refused rather than silently truncated: the
+        // native side builds a std::string from the pointer, so everything past the first NUL
+        // would be dropped and the list accepted -- the same "set but quietly degraded" shape
+        // the engine refuses an empty entry for.
+        Assert.Throws<ArgumentException>(() => request.SetOptionArray("phonemes", ["h\u0259l\u02c8O\0wrld"]));
 
         // A null element must be refused rather than marshalled as a null pointer, and refused
         // BEFORE anything is written, so the option cannot be left half-assigned.

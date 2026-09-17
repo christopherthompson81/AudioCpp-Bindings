@@ -224,6 +224,13 @@ public sealed class AudioCppRequest : SafeHandle
         for (var i = 0; i < values.Count; i++)
         {
             var value = values[i] ?? throw new ArgumentException($"values[{i}] is null", nameof(values));
+            // The ABI builds a std::string from the pointer, so a value carrying its own NUL
+            // would arrive truncated at it and be accepted -- a list quietly shorter than the
+            // one that was set. Refused here, with the rest, before anything is pinned.
+            if (value.Contains('\0'))
+            {
+                throw new ArgumentException($"values[{i}] contains an embedded NUL", nameof(values));
+            }
             var buffer = new byte[Encoding.UTF8.GetByteCount(value) + 1];
             Encoding.UTF8.GetBytes(value, buffer);
             buffers[i] = buffer;
