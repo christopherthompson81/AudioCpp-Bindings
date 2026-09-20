@@ -95,7 +95,7 @@ internal static class Program
             {
                 RunCase(testCase, modelsRoot, clip, alternate, backend);
             }
-            CheckSuppliedPhonemes(modelsRoot, backend);
+            CheckKokoro(modelsRoot, backend);
         }
         catch (DllNotFoundException exception)
         {
@@ -115,30 +115,29 @@ internal static class Program
     }
 
     /// <summary>
-    /// A list-valued request option, end to end: the values have to reach the family and change
-    /// what it synthesizes, not merely be accepted by the setter.
+    /// Loads Kokoro once and runs every check that needs it.
     ///
     /// <para>
-    /// Kokoro's <c>phonemes</c> is the only family that reads one today. The option set a model
-    /// declares is embedded in its GGUF at conversion time and a published package cannot be
-    /// edited in place, so the engine drops the key from its VALIDATION COPY when the contract
-    /// predates the option — a shipped package takes phonemes it never declared. This therefore
-    /// runs either way and only REPORTS which side it ran, because skipping on the declaration
-    /// would skip on the package everyone actually has. Point <c>AUDIOCPP_KOKORO_SPEC</c> at
-    /// <c>model_specs/kokoro_tts.json</c> to run the declared side.
+    /// ⚠ ONE LOAD, NOT ONE PER CHECK. Each of these used to open its own registry, model and
+    /// session over the same 190 MB package, on what is already the slowest test in the suite —
+    /// and the second copy tested nothing the first had not. The skip rules are the ones the
+    /// individual checks had: a package that is not installed, and a family this build did not
+    /// link, are both build-time facts rather than failures.
     /// </para>
     ///
     /// <para>
-    /// Emits no <c>parity:</c> lines on purpose: those are diffed against the C test, which does
-    /// not run this.
+    /// <c>AUDIOCPP_KOKORO_SPEC</c> points the load at <c>model_specs/kokoro_tts.json</c> instead
+    /// of the contract embedded in the package. A published package's contract predates both the
+    /// <c>phonemes</c> option and the <c>word_timestamps</c> capability, so the override is how
+    /// the declared side of each gets exercised at all.
     /// </para>
     /// </summary>
-    private static void CheckSuppliedPhonemes(string modelsRoot, BackendConfig backend)
+    private static void CheckKokoro(string modelsRoot, BackendConfig backend)
     {
         var modelPath = Path.Combine(modelsRoot, "Kokoro-82M-GGUF", "kokoro-82m-q8_0.gguf");
         if (!File.Exists(modelPath))
         {
-            Console.WriteLine("option arrays: no kokoro package; skipping");
+            Console.WriteLine("kokoro: no package; skipping");
             _skipped++;
             return;
         }
@@ -162,15 +161,12 @@ internal static class Program
             // Same rule as RunCase: a family this build did not link is a build-time choice,
             // so it is a skip. Without this the package being on disk while kokoro_tts is not
             // in the composite throws out of Main -- a stack trace and no summary line.
-            Console.WriteLine($"option arrays: skip (load: {exception.Detail})");
+            Console.WriteLine($"kokoro: skip (load: {exception.Detail})");
             _skipped++;
             return;
         }
 
         using var owned = model;
-        var declared = model.GetOptions(AudioCppOptionScope.Request).Any(o => o.Name == "phonemes");
-        Console.WriteLine($"option arrays: package declares a 'phonemes' request option: {(declared ? "yes" : "no")}");
-
         AudioCppSession session;
         try
         {
@@ -178,12 +174,213 @@ internal static class Program
         }
         catch (AudioCppException exception)
         {
-            Console.WriteLine($"option arrays: skip (session: {exception.Detail})");
+            Console.WriteLine($"kokoro: skip (session: {exception.Detail})");
             _skipped++;
             return;
         }
 
         using var ownedSession = session;
+        CheckSuppliedPhonemes(model, session);
+        CheckWordTimings(model, session, contractDeclaresIt: !string.IsNullOrEmpty(specOverride));
+    }
+
+    /// <summary>
+    /// Word timings out of a TTS family, end to end: the ABI has carried
+    /// <c>audiocpp_result_word()</c> all along and <c>kokoro_tts</c> now fills it, so what is
+    /// being tested is whether measured timings actually cross the boundary — not whether the
+    /// accessor compiles.
+    ///
+    /// <para>
+    /// ⚠ NOTHING IN THE BINDING CHANGED FOR THIS, which is the reason to test it here rather
+    /// than trust it. <c>AudioCppResult.Words</c> and <c>AudioCppModel.SupportsTimestamps</c>
+    /// were already bound and already returned nothing, because no TTS family populated the
+    /// field. A binding that is correct and a binding that is inert look identical from inside
+    /// the binding; only a family that reports something tells them apart.
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠ IT RUNS WHATEVER <c>SupportsTimestamps</c> SAYS, for the same reason
+    /// CheckSuppliedPhonemes ignores the declared option: a published package's embedded contract
+    /// predates the capability, so the timings arrive while the flag still reads false, and
+    /// gating on the flag would skip on the package everyone actually has. Point
+    /// <c>AUDIOCPP_KOKORO_SPEC</c> at <c>model_specs/kokoro_tts.json</c> to run the declared side.
+    ///
+    /// <para>
+    /// An engine with no timings at all IS a skip — the pinned engine may predate the change —
+    /// but only when nothing else could explain it; see the empty-list branch below, which fails
+    /// instead whenever the run was told to expect the current contract.
+    /// </para>
+    /// </para>
+    /// </summary>
+    private static void CheckWordTimings(AudioCppModel model, AudioCppSession session, bool contractDeclaresIt)
+    {
+        Console.WriteLine($"word timings: model advertises timestamps: {(model.SupportsTimestamps ? "yes" : "no")}");
+
+        // ⚠ FRAMES, NOT Samples.Length. The spans are frame offsets, and Samples.Length counts
+        // INTERLEAVED samples — identical while Kokoro is mono, and half the real length on the
+        // first multi-channel family this is ever pointed at, which would read as ~50% coverage
+        // and fail for a reason that has nothing to do with the timings.
+        (long Frames, IReadOnlyList<WordTimestamp> Words, int Rate, bool Refused) Speak(
+            IReadOnlyList<string> phonemes, float rate = 1.0f)
+        {
+            using var request = new AudioCppRequest();
+            request.SetText("placeholder", "en-us");
+            request.SetVoiceId("af_heart");
+            request.SetSpeakingRate(rate);
+            request.SetOptionArray("phonemes", phonemes);
+            try
+            {
+                using var result = session.Run(request);
+                var audio = result.Audio;
+                return (audio?.Frames ?? 0, result.Words, audio?.SampleRate ?? 0, false);
+            }
+            catch (AudioCppException error)
+            {
+                // Every call here is one the engine is supposed to serve, so a refusal is a failure
+                // of THIS test rather than of the run -- reported with what the engine said, the
+                // way CheckSuppliedPhonemes does, instead of thrown out of Main as a stack trace
+                // that loses the summary line. Reported AS a refusal, so the empty word list it
+                // produces cannot be mistaken downstream for an engine that has no timings.
+                Check(false, $"synthesis was refused: {error.Message}");
+                return (0, [], 0, true);
+            }
+        }
+
+        // ⚠ THE EXPECTED COUNT IS DERIVED FROM THE STREAM, NOT WRITTEN DOWN. The first version of
+        // this hard-coded it and hard-coded it wrong — six groups counted as five — so the test
+        // failed against an engine that was right. A literal here is a second place to make the
+        // mistake the assertion exists to catch.
+        const string Utterance = "ðə hˈɑɹbɚ wʌz kwˈaɪət ðɪs mˈɔɹnɪŋ";
+        var expectedGroups = Utterance.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+
+        var (frames, words, sampleRate, refused) = Speak([Utterance]);
+        if (refused) return;   // already reported; the empty list below is not the engine's answer
+        if (words.Count == 0)
+        {
+            // ⚠ "OLD ENGINE" IS ONLY ONE OF THE REASONS THIS CAN BE EMPTY, and the others are
+            // defects. append_kokoro_word_timings reports nothing — deliberately, rather than
+            // throwing — when its token and duration counts disagree, and again when the durations
+            // sum to zero. Blaming the pin for those would print a reassuring sentence over a
+            // broken invariant and leave CI green, which is the failure this method's own doc
+            // claims to avoid.
+            //
+            // Nothing observable separates the two: SupportsTimestamps cannot, since it reads
+            // false on a current engine with a published package. What CAN separate them is
+            // intent — a run pointed at the current contract has asked for an engine that reports
+            // timings, so silence there is a failure rather than a configuration.
+            if (contractDeclaresIt)
+            {
+                Check(false, "the engine reported no word timings, with AUDIOCPP_KOKORO_SPEC "
+                             + "pointing at the current contract: this build is supposed to report "
+                             + "them, so an empty list is a defect and not an old pin");
+                return;
+            }
+
+            Console.WriteLine("word timings: engine reported none — either the pinned engine "
+                              + "predates kokoro_tts word timings, or it skipped them (it does "
+                              + "that on a token/duration mismatch). Re-run with "
+                              + "AUDIOCPP_KOKORO_SPEC set to tell the two apart; nothing asserted");
+            _skipped++;
+            return;
+        }
+
+        var failuresBefore = _failures;
+        _ran++;
+
+        Check(frames > 0 && sampleRate > 0, "supplied phonemes produced no audio to time against");
+        // One entry per spoken group. A standalone punctuation mark is not a group, which is why
+        // this stream deliberately carries none.
+        Check(words.Count == expectedGroups,
+              $"expected one timing per phoneme group ({expectedGroups}), got {words.Count}");
+
+        // ⚠ ONE SET OF RULES, APPLIED TO EVERY RUN. Written inline for the single-entry case and
+        // summarised for the merged one, the merged case quietly got weaker checks: tracking only
+        // the running end lets a zero-length or inverted span slide past, because the next
+        // comparison against a moved-backwards cursor passes trivially.
+        void CheckTimeline(string label, IReadOnlyList<WordTimestamp> timings, long totalFrames)
+        {
+            long previousEnd = 0;
+            foreach (var word in timings)
+            {
+                Check(word.StartSample >= previousEnd,
+                      $"{label}: \"{word.Word}\" starts at {word.StartSample} before the previous group ended at {previousEnd}");
+                Check(word.EndSample > word.StartSample, $"{label}: \"{word.Word}\" has no duration");
+                Check(word.EndSample <= totalFrames,
+                      $"{label}: \"{word.Word}\" ends at {word.EndSample}, past the {totalFrames}-frame buffer");
+                Check(word.Word.Length > 0, $"{label}: a timing came back with no label");
+                previousEnd = word.EndSample;
+            }
+
+            // The last group must reach the end of the utterance. Not exactly: Kokoro's trailing
+            // pad token carries real frames and belongs to no word, so a few percent of silence
+            // after the last group is correct rather than a shortfall.
+            if (timings.Count == 0 || totalFrames == 0) return;
+            var covered = previousEnd / (double)totalFrames;
+            Check(covered is > 0.90 and <= 1.0,
+                  $"{label}: the last group ends at {covered:P1} of the buffer, so the timings do not span it");
+        }
+
+        CheckTimeline("one entry", words, frames);
+
+        // ⚠ SPEED IS THE CASE THAT COULD BE SILENTLY WRONG. The durations are predicted from a
+        // graph that is handed the speaking rate, but a rate applied to the AUDIO after prediction
+        // would leave the timings describing the 1.0 timeline with nothing to indicate it. Same
+        // coverage test at a different rate is what catches that.
+        var fast = Speak([Utterance], 1.5f);
+        Check(fast.Frames < frames, "a 1.5x rate did not shorten the audio");
+        // Asserted, not guarded: the engine has already reported timings once in this run, so a
+        // rate change producing none is a result, and an `if` would have swallowed it.
+        Check(fast.Words.Count == expectedGroups,
+              $"at 1.5x the engine reported {fast.Words.Count} timings for {expectedGroups} groups");
+        CheckTimeline("1.5x", fast.Words, fast.Frames);
+
+        // A caller's chunking is merged into one buffer, so the timings must be merged into one
+        // timeline too — the second entry's groups offset by the first entry's audio, not restarted.
+        // ⚠ SPLIT FROM `Utterance`, NOT RETYPED. A hand-copied second stream is the same trap the
+        // derived count above exists to avoid: edit the utterance and this one silently keeps
+        // speaking the old text, so the merge assertion fails for a reason that has nothing to do
+        // with merging — while the comment still claims it is "the same utterance, split".
+        var groups = Utterance.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var split = groups.Length / 2;
+        var twoEntries = Speak([
+            string.Join(' ', groups[..split]),
+            string.Join(' ', groups[split..]),
+        ]);
+        Check(twoEntries.Words.Count == expectedGroups,
+              $"a 2-entry list reported {twoEntries.Words.Count} timings for {expectedGroups} groups");
+        CheckTimeline("two entries", twoEntries.Words, twoEntries.Frames);
+        // And specifically that the SEAM is invisible: the first group of the second entry has to
+        // sit after the first entry's audio, not back at zero.
+        if (twoEntries.Words.Count == expectedGroups && split < twoEntries.Words.Count)
+            Check(twoEntries.Words[split].StartSample > twoEntries.Words[split - 1].StartSample,
+                  "timings restarted at the entry boundary instead of continuing across it");
+
+        if (_failures == failuresBefore) Console.WriteLine("word timings: ok");
+    }
+
+    /// <summary>
+    /// A list-valued request option, end to end: the values have to reach the family and change
+    /// what it synthesizes, not merely be accepted by the setter.
+    ///
+    /// <para>
+    /// Kokoro's <c>phonemes</c> is the only family that reads one today. The option set a model
+    /// declares is embedded in its GGUF at conversion time and a published package cannot be
+    /// edited in place, so the engine drops the key from its VALIDATION COPY when the contract
+    /// predates the option — a shipped package takes phonemes it never declared. This therefore
+    /// runs either way and only REPORTS which side it ran, because skipping on the declaration
+    /// would skip on the package everyone actually has. Point <c>AUDIOCPP_KOKORO_SPEC</c> at
+    /// <c>model_specs/kokoro_tts.json</c> to run the declared side.
+    /// </para>
+    ///
+    /// <para>
+    /// Emits no <c>parity:</c> lines on purpose: those are diffed against the C test, which does
+    /// not run this.
+    /// </para>
+    /// </summary>
+    private static void CheckSuppliedPhonemes(AudioCppModel model, AudioCppSession session)
+    {
+        var declared = model.GetOptions(AudioCppOptionScope.Request).Any(o => o.Name == "phonemes");
+        Console.WriteLine($"option arrays: package declares a 'phonemes' request option: {(declared ? "yes" : "no")}");
         var failuresBefore = _failures;
 
         float[] Speak(string text, IReadOnlyList<string>? phonemes)
