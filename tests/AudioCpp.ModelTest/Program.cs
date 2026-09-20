@@ -96,6 +96,7 @@ internal static class Program
                 RunCase(testCase, modelsRoot, clip, alternate, backend);
             }
             CheckSuppliedPhonemes(modelsRoot, backend);
+            CheckWordTimings(modelsRoot, backend);
         }
         catch (DllNotFoundException exception)
         {
@@ -112,6 +113,170 @@ internal static class Program
         }
         Console.WriteLine("c# model test OK");
         return 0;
+    }
+
+    /// <summary>
+    /// Word timings out of a TTS family, end to end: the ABI has carried
+    /// <c>audiocpp_result_word()</c> all along and <c>kokoro_tts</c> now fills it, so what is
+    /// being tested is whether measured timings actually cross the boundary — not whether the
+    /// accessor compiles.
+    ///
+    /// <para>
+    /// ⚠ NOTHING IN THE BINDING CHANGED FOR THIS, which is the reason to test it here rather
+    /// than trust it. <c>AudioCppResult.Words</c> and <c>AudioCppModel.SupportsTimestamps</c>
+    /// were already bound and already returned nothing, because no TTS family populated the
+    /// field. A binding that is correct and a binding that is inert look identical from inside
+    /// the binding; only a family that reports something tells them apart.
+    /// </para>
+    ///
+    /// <para>
+    /// ⚠ AND IT REPORTS RATHER THAN SKIPS when the engine has no timings to give, for the same
+    /// reason CheckSuppliedPhonemes does: the pinned engine may predate the change, and a test
+    /// that skipped itself into silence on the default pin would be indistinguishable from one
+    /// that passes. Point <c>AUDIOCPP_KOKORO_SPEC</c> at <c>model_specs/kokoro_tts.json</c> to
+    /// see the capability declared as well — a published package's embedded contract predates it,
+    /// so the timings arrive while <c>SupportsTimestamps</c> still reads false.
+    /// </para>
+    /// </summary>
+    private static void CheckWordTimings(string modelsRoot, BackendConfig backend)
+    {
+        var modelPath = Path.Combine(modelsRoot, "Kokoro-82M-GGUF", "kokoro-82m-q8_0.gguf");
+        if (!File.Exists(modelPath))
+        {
+            Console.WriteLine("word timings: no kokoro package; skipping");
+            _skipped++;
+            return;
+        }
+
+        var specOverride = Environment.GetEnvironmentVariable("AUDIOCPP_KOKORO_SPEC");
+        var config = new ModelConfig("kokoro_tts")
+        {
+            ModelSpecOverride = string.IsNullOrEmpty(specOverride) ? null : specOverride,
+        };
+
+        using var registry = AudioCppRegistry.Create();
+        AudioCppModel model;
+        try
+        {
+            model = registry.Load(modelPath, config);
+        }
+        catch (AudioCppException exception)
+        {
+            Console.WriteLine($"word timings: skip (load: {exception.Detail})");
+            _skipped++;
+            return;
+        }
+
+        using var owned = model;
+        Console.WriteLine($"word timings: model advertises timestamps: {(model.SupportsTimestamps ? "yes" : "no")}");
+
+        AudioCppSession session;
+        try
+        {
+            session = model.CreateSession("tts", "offline", backend);
+        }
+        catch (AudioCppException exception)
+        {
+            Console.WriteLine($"word timings: skip (session: {exception.Detail})");
+            _skipped++;
+            return;
+        }
+
+        using var ownedSession = session;
+
+        (float[] Audio, IReadOnlyList<WordTimestamp> Words, int Rate) Speak(
+            IReadOnlyList<string> phonemes, float rate = 1.0f)
+        {
+            using var request = new AudioCppRequest();
+            request.SetText("placeholder", "en-us");
+            request.SetVoiceId("af_heart");
+            request.SetSpeakingRate(rate);
+            request.SetOptionArray("phonemes", phonemes);
+            using var result = session.Run(request);
+            var audio = result.Audio;
+            return (audio?.Samples ?? [], result.Words, audio?.SampleRate ?? 0);
+        }
+
+        // ⚠ THE EXPECTED COUNT IS DERIVED FROM THE STREAM, NOT WRITTEN DOWN. The first version of
+        // this hard-coded it and hard-coded it wrong — six groups counted as five — so the test
+        // failed against an engine that was right. A literal here is a second place to make the
+        // mistake the assertion exists to catch.
+        const string Utterance = "ðə hˈɑɹbɚ wʌz kwˈaɪət ðɪs mˈɔɹnɪŋ";
+        var expectedGroups = Utterance.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+
+        var (audio, words, sampleRate) = Speak([Utterance]);
+        if (words.Count == 0)
+        {
+            // Not a failure: an engine older than the change reports nothing, and this test is in
+            // the tree before the pin moves. Said out loud so it cannot be mistaken for a pass.
+            Console.WriteLine("word timings: engine reported none — pinned engine predates "
+                              + "kokoro_tts word timings; nothing to assert");
+            _skipped++;
+            return;
+        }
+
+        var failuresBefore = _failures;
+        _ran++;
+
+        Check(audio.Length > 0 && sampleRate > 0, "supplied phonemes produced no audio to time against");
+        // One entry per spoken group. A standalone punctuation mark is not a group, which is why
+        // this stream deliberately carries none.
+        Check(words.Count == expectedGroups,
+              $"expected one timing per phoneme group ({expectedGroups}), got {words.Count}");
+
+        var duration = audio.Length / (double)sampleRate;
+        long previousEnd = 0;
+        foreach (var word in words)
+        {
+            Check(word.StartSample >= previousEnd,
+                  $"\"{word.Word}\" starts at {word.StartSample} before the previous group ended at {previousEnd}");
+            Check(word.EndSample > word.StartSample, $"\"{word.Word}\" has no duration");
+            Check(word.EndSample <= audio.Length,
+                  $"\"{word.Word}\" ends at {word.EndSample}, past the {audio.Length}-sample buffer");
+            Check(word.Word.Length > 0, "a timing came back with no label");
+            previousEnd = word.EndSample;
+        }
+
+        // The last group must reach the end of the utterance. Not exactly: Kokoro's trailing pad
+        // token carries real frames and belongs to no word, so a few percent of silence after the
+        // last group is correct rather than a shortfall.
+        var covered = previousEnd / (double)audio.Length;
+        Check(covered is > 0.90 and <= 1.0,
+              $"the last group ends at {covered:P1} of the buffer, so the timings do not span it");
+
+        // ⚠ SPEED IS THE CASE THAT COULD BE SILENTLY WRONG. The durations are predicted from a
+        // graph that is handed the speaking rate, but a rate applied to the AUDIO after prediction
+        // would leave the timings describing the 1.0 timeline with nothing to indicate it. Same
+        // coverage test at a different rate is what catches that.
+        var fast = Speak([Utterance], 1.5f);
+        Check(fast.Audio.Length < audio.Length, "a 1.5x rate did not shorten the audio");
+        if (fast.Words.Count > 0)
+        {
+            var fastCovered = fast.Words[^1].EndSample / (double)fast.Audio.Length;
+            Check(fastCovered is > 0.90 and <= 1.0,
+                  $"at 1.5x the last group ends at {fastCovered:P1} of the buffer: the timings "
+                  + "describe a different timeline than the audio");
+        }
+
+        // A caller's chunking is merged into one buffer, so the timings must be merged into one
+        // timeline too — the second entry's groups offset by the first entry's audio, not restarted.
+        // The same utterance, split — so the group count must be identical to the single-entry
+        // run and the boundary must be invisible in the timeline.
+        var twoEntries = Speak(["ðə hˈɑɹbɚ wʌz kwˈaɪət", "ðɪs mˈɔɹnɪŋ"]);
+        Check(twoEntries.Words.Count == expectedGroups,
+              $"a 2-entry list reported {twoEntries.Words.Count} timings for {expectedGroups} groups");
+        long across = 0;
+        var monotonic = true;
+        foreach (var word in twoEntries.Words)
+        {
+            if (word.StartSample < across) monotonic = false;
+            across = word.EndSample;
+        }
+        Check(monotonic, "timings restarted at the entry boundary instead of continuing");
+        Check(across <= twoEntries.Audio.Length,
+              $"the merged timeline ends at {across}, past its {twoEntries.Audio.Length}-sample buffer");
+
+        if (_failures == failuresBefore) Console.WriteLine("word timings: ok");
     }
 
     /// <summary>
