@@ -192,9 +192,21 @@ internal static class Program
             request.SetVoiceId("af_heart");
             request.SetSpeakingRate(rate);
             request.SetOptionArray("phonemes", phonemes);
-            using var result = session.Run(request);
-            var audio = result.Audio;
-            return (audio?.Samples ?? [], result.Words, audio?.SampleRate ?? 0);
+            try
+            {
+                using var result = session.Run(request);
+                var audio = result.Audio;
+                return (audio?.Samples ?? [], result.Words, audio?.SampleRate ?? 0);
+            }
+            catch (AudioCppException error)
+            {
+                // Every call here is one the engine is supposed to serve, so a refusal is a failure
+                // of THIS test rather than of the run -- reported with what the engine said, the
+                // way CheckSuppliedPhonemes does, instead of thrown out of Main as a stack trace
+                // that loses the summary line.
+                Check(false, $"synthesis was refused: {error.Message}");
+                return ([], [], 0);
+            }
         }
 
         // ⚠ THE EXPECTED COUNT IS DERIVED FROM THE STREAM, NOT WRITTEN DOWN. The first version of
@@ -224,7 +236,6 @@ internal static class Program
         Check(words.Count == expectedGroups,
               $"expected one timing per phoneme group ({expectedGroups}), got {words.Count}");
 
-        var duration = audio.Length / (double)sampleRate;
         long previousEnd = 0;
         foreach (var word in words)
         {
@@ -250,7 +261,11 @@ internal static class Program
         // coverage test at a different rate is what catches that.
         var fast = Speak([Utterance], 1.5f);
         Check(fast.Audio.Length < audio.Length, "a 1.5x rate did not shorten the audio");
-        if (fast.Words.Count > 0)
+        // Asserted, not guarded: the engine has already reported timings once in this run, so a
+        // rate change producing none is a result, and an `if` would have swallowed it.
+        Check(fast.Words.Count == expectedGroups,
+              $"at 1.5x the engine reported {fast.Words.Count} timings for {expectedGroups} groups");
+        if (fast.Words.Count > 0 && fast.Audio.Length > 0)
         {
             var fastCovered = fast.Words[^1].EndSample / (double)fast.Audio.Length;
             Check(fastCovered is > 0.90 and <= 1.0,
