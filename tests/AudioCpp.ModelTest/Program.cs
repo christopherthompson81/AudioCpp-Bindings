@@ -127,9 +127,10 @@ internal static class Program
     ///
     /// <para>
     /// <c>AUDIOCPP_KOKORO_SPEC</c> points the load at <c>model_specs/kokoro_tts.json</c> instead
-    /// of the contract embedded in the package. A published package's contract predates both the
-    /// <c>phonemes</c> option and the <c>word_timestamps</c> capability, so the override is how
-    /// the declared side of each gets exercised at all.
+    /// of the contract embedded in the package. A published package's contract predates the
+    /// <c>phonemes</c> and <c>return_timestamps</c> request options, so the override is how the
+    /// DECLARED side of those gets exercised at all. It turns on no capability: kokoro declares
+    /// none for timings in either contract.
     /// </para>
     /// </summary>
     private static void CheckKokoro(string modelsRoot, BackendConfig backend)
@@ -199,11 +200,12 @@ internal static class Program
     /// </para>
     ///
     /// <para>
-    /// ⚠ IT RUNS WHATEVER <c>SupportsTimestamps</c> SAYS, for the same reason
-    /// CheckSuppliedPhonemes ignores the declared option: a published package's embedded contract
-    /// predates the capability, so the timings arrive while the flag still reads false, and
-    /// gating on the flag would skip on the package everyone actually has. Point
-    /// <c>AUDIOCPP_KOKORO_SPEC</c> at <c>model_specs/kokoro_tts.json</c> to run the declared side.
+    /// ⚠ IT RUNS WHATEVER <c>SupportsTimestamps</c> SAYS, and that flag reads false on BOTH sides
+    /// of the override. Review of the engine change deleted <c>word_timestamps</c> from kokoro's
+    /// capabilities outright — the current spec is <c>["built_in_voices", "long_form"]</c> — so
+    /// there is no declared side for timings to exercise and nothing the override can turn on. The
+    /// feature is a <c>return_timestamps</c> REQUEST OPTION, which the override does declare, and
+    /// which the engine serves either way.
     ///
     /// <para>
     /// An engine with no timings at all IS a skip — the pinned engine may predate the change —
@@ -220,7 +222,7 @@ internal static class Program
         // INTERLEAVED samples — identical while Kokoro is mono, and half the real length on the
         // first multi-channel family this is ever pointed at, which would read as ~50% coverage
         // and fail for a reason that has nothing to do with the timings.
-        (long Frames, IReadOnlyList<WordTimestamp> Words, int Rate, bool Refused) Speak(
+        (long Frames, float[] Samples, IReadOnlyList<WordTimestamp> Words, int Rate, string? Refusal) Speak(
             IReadOnlyList<string> phonemes, float rate = 1.0f, bool timings = true)
         {
             using var request = new AudioCppRequest();
@@ -233,17 +235,16 @@ internal static class Program
             {
                 using var result = session.Run(request);
                 var audio = result.Audio;
-                return (audio?.Frames ?? 0, result.Words, audio?.SampleRate ?? 0, false);
+                return (audio?.Frames ?? 0, audio?.Samples ?? [], result.Words, audio?.SampleRate ?? 0, null);
             }
             catch (AudioCppException error)
             {
-                // Every call here is one the engine is supposed to serve, so a refusal is a failure
-                // of THIS test rather than of the run -- reported with what the engine said, the
-                // way CheckSuppliedPhonemes does, instead of thrown out of Main as a stack trace
-                // that loses the summary line. Reported AS a refusal, so the empty word list it
-                // produces cannot be mistaken downstream for an engine that has no timings.
-                Check(false, $"synthesis was refused: {error.Message}");
-                return (0, [], 0, true);
+                // ⚠ RETURNED, NOT REPORTED, because one refusal is not a failure: an engine older
+                // than the option rejects `return_timestamps` as unknown, and that is a build-time
+                // choice the caller has to be able to treat as a skip. Everything else here is a
+                // request the engine is supposed to serve, so the caller reports those -- with what
+                // the engine said -- rather than letting it out of Main as a stack trace.
+                return (0, [], [], 0, error.Message);
             }
         }
 
@@ -254,8 +255,25 @@ internal static class Program
         const string Utterance = "ðə hˈɑɹbɚ wʌz kwˈaɪət ðɪs mˈɔɹnɪŋ";
         var expectedGroups = Utterance.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
-        var (frames, words, sampleRate, refused) = Speak([Utterance]);
-        if (refused) return;   // already reported; the empty list below is not the engine's answer
+        var (frames, samples, words, sampleRate, refusal) = Speak([Utterance]);
+        if (refusal is not null)
+        {
+            // ⚠ THE OLD-ENGINE CASE ARRIVES HERE, NOT AT THE EMPTY LIST BELOW. An engine whose
+            // kokoro contract has no `return_timestamps` REFUSES the request outright -- the
+            // drop-list that lets a published package's older contract through was added by the
+            // same change that added the option -- so it never renders and never reports an empty
+            // list. Treating that as a failure would turn a build-time choice red.
+            if (refusal.Contains("unknown", StringComparison.OrdinalIgnoreCase)
+                && refusal.Contains("return_timestamps", StringComparison.Ordinal))
+            {
+                Console.WriteLine("word timings: engine rejects return_timestamps — this build "
+                                  + "predates the option; nothing to assert");
+                _skipped++;
+                return;
+            }
+            Check(false, $"synthesis was refused: {refusal}");
+            return;
+        }
         if (words.Count == 0)
         {
             // ⚠ "OLD ENGINE" IS ONLY ONE OF THE REASONS THIS CAN BE EMPTY, and the others are
@@ -278,10 +296,13 @@ internal static class Program
                 return;
             }
 
-            Console.WriteLine("word timings: engine reported none for a request that asked for "
-                              + "them — either the pinned engine predates return_timestamps, or it "
-                              + "skipped them (it does that on a token/duration mismatch). Re-run "
-                              + "with AUDIOCPP_KOKORO_SPEC set to tell the two apart; nothing asserted");
+            // An engine predating the option cannot reach here — it refuses the request instead,
+            // which the branch above catches — so the remaining cause is the engine declining to
+            // report: append_kokoro_word_timings returns empty on a token/duration mismatch and on
+            // durations summing to zero, both defects.
+            Console.WriteLine("word timings: the engine accepted return_timestamps and reported "
+                              + "none, which it only does on a token/duration mismatch. Re-run with "
+                              + "AUDIOCPP_KOKORO_SPEC set to make this a failure; nothing asserted");
             _skipped++;
             return;
         }
@@ -331,11 +352,24 @@ internal static class Program
         // written-word one. If the default ever drifted back to on, every such caller would start
         // receiving it again silently, which is the failure the redesign exists to prevent.
         var unasked = Speak([Utterance], timings: false);
-        Check(unasked.Words.Count == 0,
-              $"timings came back for a request that did not set return_timestamps "
-              + $"({unasked.Words.Count} of them): the option is supposed to be opt-in");
-        Check(unasked.Frames == frames,
-              "asking for timings changed the audio, which it must not");
+        // The refusal has to be checked before the assertions, or a refused opt-out request passes
+        // the opt-in check vacuously — an empty word list because nothing rendered — while the
+        // audio comparison fires and blames a cause that had nothing to do with it.
+        if (unasked.Refusal is not null)
+        {
+            Check(false, $"the opt-out request was refused: {unasked.Refusal}");
+        }
+        else
+        {
+            Check(unasked.Words.Count == 0,
+                  $"timings came back for a request that did not set return_timestamps "
+                  + $"({unasked.Words.Count} of them): the option is supposed to be opt-in");
+            // Samples, not the frame count: a change that altered the waveform without altering
+            // its length would pass a length comparison, and the message would still claim the
+            // audio was untouched. CheckSuppliedPhonemes compares samples for the same question.
+            Check(unasked.Samples.SequenceEqual(samples),
+                  "asking for timings changed the audio, which it must not");
+        }
 
         // ⚠ SPEED IS THE CASE THAT COULD BE SILENTLY WRONG. The durations are predicted from a
         // graph that is handed the speaking rate, but a rate applied to the AUDIO after prediction
