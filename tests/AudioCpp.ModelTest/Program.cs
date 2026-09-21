@@ -221,13 +221,14 @@ internal static class Program
         // first multi-channel family this is ever pointed at, which would read as ~50% coverage
         // and fail for a reason that has nothing to do with the timings.
         (long Frames, IReadOnlyList<WordTimestamp> Words, int Rate, bool Refused) Speak(
-            IReadOnlyList<string> phonemes, float rate = 1.0f)
+            IReadOnlyList<string> phonemes, float rate = 1.0f, bool timings = true)
         {
             using var request = new AudioCppRequest();
             request.SetText("placeholder", "en-us");
             request.SetVoiceId("af_heart");
             request.SetSpeakingRate(rate);
             request.SetOptionArray("phonemes", phonemes);
+            if (timings) request.SetOption("return_timestamps", "true");
             try
             {
                 using var result = session.Run(request);
@@ -270,16 +271,17 @@ internal static class Program
             // timings, so silence there is a failure rather than a configuration.
             if (contractDeclaresIt)
             {
-                Check(false, "the engine reported no word timings, with AUDIOCPP_KOKORO_SPEC "
-                             + "pointing at the current contract: this build is supposed to report "
-                             + "them, so an empty list is a defect and not an old pin");
+                Check(false, "the engine reported no word timings for a request that set "
+                             + "return_timestamps, with AUDIOCPP_KOKORO_SPEC pointing at the "
+                             + "current contract: this build is supposed to report them, so an "
+                             + "empty list is a defect and not an old pin");
                 return;
             }
 
-            Console.WriteLine("word timings: engine reported none — either the pinned engine "
-                              + "predates kokoro_tts word timings, or it skipped them (it does "
-                              + "that on a token/duration mismatch). Re-run with "
-                              + "AUDIOCPP_KOKORO_SPEC set to tell the two apart; nothing asserted");
+            Console.WriteLine("word timings: engine reported none for a request that asked for "
+                              + "them — either the pinned engine predates return_timestamps, or it "
+                              + "skipped them (it does that on a token/duration mismatch). Re-run "
+                              + "with AUDIOCPP_KOKORO_SPEC set to tell the two apart; nothing asserted");
             _skipped++;
             return;
         }
@@ -321,6 +323,19 @@ internal static class Program
         }
 
         CheckTimeline("one entry", words, frames);
+
+        // ⚠ THE OPT-IN IS THE CONTRACT, so the OFF case is worth pinning as much as the ON case.
+        // Timings used to be reported unconditionally and advertised through the generic
+        // `word_timestamps` capability; review replaced that with a per-request option precisely so
+        // a caller cannot receive a phoneme-group alignment while believing it asked for a
+        // written-word one. If the default ever drifted back to on, every such caller would start
+        // receiving it again silently, which is the failure the redesign exists to prevent.
+        var unasked = Speak([Utterance], timings: false);
+        Check(unasked.Words.Count == 0,
+              $"timings came back for a request that did not set return_timestamps "
+              + $"({unasked.Words.Count} of them): the option is supposed to be opt-in");
+        Check(unasked.Frames == frames,
+              "asking for timings changed the audio, which it must not");
 
         // ⚠ SPEED IS THE CASE THAT COULD BE SILENTLY WRONG. The durations are predicted from a
         // graph that is handed the speaking rate, but a rate applied to the AUDIO after prediction
