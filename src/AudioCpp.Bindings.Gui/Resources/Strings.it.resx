@@ -83,6 +83,9 @@
   <data name="request.language" xml:space="preserve">
     <value>Lingua</value>
   </data>
+  <data name="request.optional" xml:space="preserve">
+    <value>opzionale</value>
+  </data>
   <data name="request.sourceAudio" xml:space="preserve">
     <value>Audio sorgente</value>
   </data>
@@ -222,7 +225,7 @@
     <value>Progettazione voce</value>
   </data>
   <data name="workflow.music" xml:space="preserve">
-    <value>Generazione musicale</value>
+    <value>Generazione di musica e video</value>
   </data>
   <data name="workflow.sep" xml:space="preserve">
     <value>Separazione sorgenti</value>

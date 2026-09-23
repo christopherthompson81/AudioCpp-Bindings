@@ -581,9 +581,13 @@
                 </StackPanel>
               </StackPanel>
 
-              <StackPanel Spacing="10" IsVisible="{Binding ShowAudioInput}">
+              <StackPanel Spacing="10" IsVisible="{Binding AcceptsAudioInput}">
                 <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
-                <TextBlock Text="{Binding [request.sourceAudio], Source={x:Static res:Loc.Current}}" Classes="Label" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="{Binding [request.sourceAudio], Source={x:Static res:Loc.Current}}" Classes="Label" />
+                  <TextBlock Text="{Binding [request.optional], Source={x:Static res:Loc.Current}}" Classes="Subtle"
+                             IsVisible="{Binding ShowOptionalAudioInput}" VerticalAlignment="Center" />
+                </StackPanel>
                 <TextBox Text="{Binding AudioPath}"
                          PlaceholderText="input WAV" />
                 <Button Content="Audio…" Click="OnPickAudio" HorizontalAlignment="Left" />
@@ -635,8 +639,11 @@
                                      Value="{Binding NumberValue}" Increment="{Binding NumberStep}"
                                      Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
                                      HorizontalAlignment="Stretch" />
-                      <TextBox Grid.Column="2" IsVisible="{Binding IsText}"
-                               Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}" />
+                      <Grid Grid.Column="2" ColumnDefinitions="*,Auto" IsVisible="{Binding IsText}">
+                        <TextBox Grid.Column="0" Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}" />
+                        <Button Grid.Column="1" Content="Browse…" Margin="6,0,0,0" IsVisible="{Binding IsPath}"
+                                Click="OnPickOptionPath" Tag="{Binding}" />
+                      </Grid>
                     </Grid>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -664,8 +671,11 @@
                                        Value="{Binding NumberValue}" Increment="{Binding NumberStep}"
                                        Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
                                        HorizontalAlignment="Stretch" />
-                        <TextBox Grid.Column="2" IsVisible="{Binding IsText}"
-                                 Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}" />
+                        <Grid Grid.Column="2" ColumnDefinitions="*,Auto" IsVisible="{Binding IsText}">
+                          <TextBox Grid.Column="0" Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}" />
+                          <Button Grid.Column="1" Content="Browse…" Margin="6,0,0,0" IsVisible="{Binding IsPath}"
+                                  Click="OnPickOptionPath" Tag="{Binding}" />
+                        </Grid>
                       </Grid>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>

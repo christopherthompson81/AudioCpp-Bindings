@@ -1070,6 +1070,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(ShowVoice));
             Notify(nameof(ShowTextChunking));
             Notify(nameof(ShowAudioInput));
+            Notify(nameof(ShowOptionalAudioInput));
+            Notify(nameof(AcceptsAudioInput));
             Notify(nameof(ShowAsrAudioControls));
             Notify(nameof(ShowVoiceDescription));
             Notify(nameof(ShowSpeechLanguage));
@@ -1314,6 +1316,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _task is not ("tts" or "clon" or "gen" or "vdes");
 
     /// <summary>
+    /// Generation starts from a prompt, but can start from a recording too.
+    /// </summary>
+    /// <remarks>
+    /// Upstream offers generation an optional source clip, and several
+    /// families use it: audio editing (AuK, ACE-Step, Stable Audio) rewrites
+    /// the clip it is given, and LiveAvatar animates a portrait to it. The
+    /// engine refuses a request that needed one and did not get it, so the box
+    /// is offered and not demanded -- demanding it is what #45 removed.
+    /// </remarks>
+    public bool ShowOptionalAudioInput => _task == "gen";
+
+    /// <summary>Whether the audio box is on screen at all, required or not.</summary>
+    public bool AcceptsAudioInput => ShowAudioInput || ShowOptionalAudioInput;
+
+    /// <summary>
     /// Live transcription and long-clip chunking are both ASR concerns. Showing
     /// them for diarisation or separation invites setting a control that is
     /// silently ignored.
@@ -1538,6 +1555,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(ShowSpeechLanguage));
 
             Options.Clear();
+            // Every component option's default, so an option without one can
+            // be offered the files no other component claims.
+            var componentDefaults = Enum.GetValues<AudioCppOptionScope>()
+                .SelectMany(model.GetOptions)
+                .Where(option => option.Name.EndsWith("_gguf", StringComparison.Ordinal))
+                .Select(option => option.DefaultValue.Trim('"'))
+                .Where(value => value.Length > 0)
+                .ToList();
             foreach (var scope in Enum.GetValues<AudioCppOptionScope>())
             {
                 foreach (var option in model.GetOptions(scope))
@@ -1547,7 +1572,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                         option.MinValue.Length > 0 || option.MaxValue.Length > 0
                             ? $"[{option.MinValue},{option.MaxValue}]"
                             : "",
-                        option.Required, option.Description, option.MinValue, option.MaxValue));
+                        option.Required, option.Description, option.MinValue, option.MaxValue,
+                        DeclaredOption.ComponentFiles(
+                            option.Name, option.ValueName, option.DefaultValue, ModelPath,
+                            componentDefaults)));
                 }
             }
 
@@ -1656,7 +1684,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 // failed the run with "Select a WAV file first." over a panel
                 // that never showed an audio box.
                 (float[] Samples, int SampleRate, int Channels)? clip = null;
-                if (ShowAudioInput)
+                if (ShowAudioInput || (ShowOptionalAudioInput && AudioPath.Length > 0))
                 {
                     if (AudioPath.Length == 0)
                         throw new InvalidOperationException("Select a WAV file first.");
@@ -1712,10 +1740,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 // became reachable with the workflow tabs: cloning demanded a
                 // source clip it has no use for, conversion never sent the
                 // target voice, and speech editing never sent its text.
-                if (ShowAudioInput)
+                if (clip is { } input)
                 {
-                    var input = clip!.Value;
-                    if (_vadModel is not null)
+                    // Segmenting is for listening to a recording, not for a
+                    // generation that starts from one: cutting an edit's source
+                    // at the pauses would make several unrelated edits.
+                    if (ShowAudioInput && _vadModel is not null)
                     {
                         // Segment first, transcribe each stretch of speech separately.
                         // Handing a long recording to the model whole means one encoder
@@ -1822,7 +1852,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                         artifact.Id, artifact.Kind.ToString()));
                     artifacts.Add(new ArtifactEntry(
                         artifact.Id, artifact.Kind.ToString(), artifact.Payload,
-                        string.Join(", ", artifact.Metadata.Select(m => $"{m.Key}={m.Value}"))));
+                        string.Join(", ", artifact.Metadata.Select(m => $"{m.Key}={m.Value}")))
+                    {
+                        // A video made from a recording is saved with it: the
+                        // frames alone are a silent film of someone talking.
+                        SourceAudio = clip is not null ? AudioPath : null,
+                    });
                 }
             });
 
@@ -2681,6 +2716,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         try
         {
+            if (artifact.Video is { } video)
+            {
+                Status = $"Encoding {path}…";
+                Status = await VideoExport.SaveAsync(artifact.Payload, video, artifact.SourceAudio, path);
+                return;
+            }
             await File.WriteAllBytesAsync(path, artifact.Payload);
             Status = $"Wrote {path}";
         }
@@ -2934,7 +2975,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 /// </summary>
 public sealed class DeclaredOption(
     string scope, string name, string type, string @default, string range, bool required,
-    string description = "", string min = "", string max = "")
+    string description = "", string min = "", string max = "",
+    IReadOnlyList<string>? fileChoices = null)
     : INotifyPropertyChanged
 {
     private string _value = "";
@@ -2965,7 +3007,7 @@ public sealed class DeclaredOption(
     /// every family, so the editors are derived from that instead. It works
     /// everywhere and cannot drift from the engine.
     /// </remarks>
-    public OptionEditor Editor => Type.Contains('|') ? OptionEditor.Choice
+    public OptionEditor Editor => Type.Contains('|') || FileChoices.Count > 0 ? OptionEditor.Choice
         : Type is "bool" ? OptionEditor.Toggle
         : Type is "int" or "float" or "number"
             ? (Min.Length > 0 && Max.Length > 0 ? OptionEditor.Slider : OptionEditor.Number)
@@ -2979,7 +3021,88 @@ public sealed class DeclaredOption(
 
     /// <summary>The alternatives for a choice option, from its pipe-separated type.</summary>
     public IReadOnlyList<string> Choices =>
-        Type.Contains('|') ? Type.Split('|', StringSplitOptions.RemoveEmptyEntries) : [];
+        Type.Contains('|') ? Type.Split('|', StringSplitOptions.RemoveEmptyEntries) : FileChoices;
+
+    /// <summary>
+    /// The files a component option can name, when the model directory has them.
+    /// </summary>
+    /// <remarks>
+    /// A family built from components -- AuK's generator, conditioner and VAE,
+    /// YuE2's main and VAE weights, LiveAvatar's three, MiniMax Music 3's three
+    /// -- declares each as a string naming a GGUF under the model root, and
+    /// every precision of every component installs into that one directory.
+    /// Upstream hand-lists the file names per family in model_params.json;
+    /// reading the directory offers the same choice without the list, and
+    /// offers only what is actually on disk. See <see cref="ComponentFiles"/>.
+    /// </remarks>
+    public IReadOnlyList<string> FileChoices { get; } = fileChoices ?? [];
+
+    /// <summary>
+    /// A free-text option that names a file: a reference image, a LoRA
+    /// adapter, a score. Shown with a Browse button beside the box.
+    /// </summary>
+    /// <remarks>
+    /// The ABI reports most of these with the type "path", which is the signal
+    /// to trust. Some specs still declare a file as a plain string --
+    /// LiveAvatar's reference_image_path -- so the name is read as well.
+    /// </remarks>
+    public bool IsPath => IsText
+        && (Type == "path"
+            || Name.EndsWith("_path", StringComparison.Ordinal)
+            || Name.EndsWith("_file", StringComparison.Ordinal)
+            || Name.EndsWith("_lora", StringComparison.Ordinal));
+
+    /// <summary>
+    /// The GGUF files a component option could name, relative to the model root.
+    /// </summary>
+    /// <remarks>
+    /// Only for string options whose name says they are one (the families that
+    /// have components all spell it <c>*_gguf</c>). The declared default is
+    /// kept in the list even when it is not on disk, so the box shows what the
+    /// model will actually try to open rather than going blank.
+    ///
+    /// Every component shares the one directory, so the list has to be cut
+    /// down to this component's files: offering YuE2's VAE as its main weights
+    /// is offering a load that fails, or worse, one that runs. A default names
+    /// the component (yue2-3b-q8_0 is "yue2-3b" at some precision), so the
+    /// files with the same stem are its other precisions. An option with no
+    /// default -- AuK's generator -- gets what is left once the other
+    /// components' stems are taken out, which is Base and Flash at every
+    /// precision and not the conditioner or the VAE.
+    /// </remarks>
+    public static IReadOnlyList<string>? ComponentFiles(
+        string name, string type, string @default, string modelPath,
+        IReadOnlyCollection<string> componentDefaults)
+    {
+        if (type.Contains('|') || !name.EndsWith("_gguf", StringComparison.Ordinal)) return null;
+        var root = Directory.Exists(modelPath) ? modelPath : Path.GetDirectoryName(modelPath);
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return null;
+
+        var files = Directory.EnumerateFiles(root, "*.gguf")
+            .Select(file => Path.GetFileName(file))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        var fallback = @default.Trim('"');
+        var mine = fallback.Length > 0
+            ? files.Where(file => Stem(file) == Stem(fallback)).ToList()
+            : files.Where(file => componentDefaults.All(taken => Stem(file) != Stem(taken))).ToList();
+        // Nothing recognisable is not a reason to hide the directory.
+        if (mine.Count > 0) files = mine;
+        if (files.Count == 0) return null;
+        // With no declared default the engine picks one itself, and a blank
+        // entry is how to go back to that after choosing a file.
+        if (!files.Contains(fallback)) files.Insert(0, fallback);
+        return files;
+    }
+
+    /// <summary>A GGUF's name without its extension and precision suffixes.</summary>
+    /// <example>yue2-3b-q8_0.gguf → yue2-3b; Wan2.2-S2V-Support-Q4_K_S-F16.gguf → wan2.2-s2v-support</example>
+    public static string Stem(string file) =>
+        PrecisionSuffix.Replace(Path.GetFileNameWithoutExtension(file).ToLowerInvariant(), "");
+
+    private static readonly System.Text.RegularExpressions.Regex PrecisionSuffix = new(
+        @"(?:[-_.](?:f32|f16|bf16|fp32|fp16|nvfp4|mxfp4|orig|q\d+(?:_[0-9a-z]+)*))+$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
     /// The model's default with any JSON quoting removed -- enum defaults arrive
@@ -3061,6 +3184,37 @@ public sealed record ArtifactEntry(string Id, string Kind, byte[] Payload, strin
     public string Summary => $"{Kind} · {Payload.Length} bytes"
                              + (Metadata.Length > 0 ? $" · {Metadata}" : "");
 
+    /// <summary>The recording the run was given, if any.</summary>
+    public string? SourceAudio { get; init; }
+
+    /// <summary>One value from the model's metadata, or empty.</summary>
+    public string Meta(string key)
+    {
+        foreach (var pair in Metadata.Split(", ", StringSplitOptions.RemoveEmptyEntries))
+        {
+            var split = pair.Split('=', 2);
+            if (split.Length == 2 && split[0].Trim() == key) return split[1].Trim();
+        }
+        return "";
+    }
+
+    /// <summary>
+    /// Raw frames rather than a file: LiveAvatar's output.
+    /// </summary>
+    /// <remarks>
+    /// The engine hands back packed RGB24 with its size and rate in the
+    /// metadata, and leaves encoding to the caller -- upstream's web UI encodes
+    /// an MP4 in the browser. Saved as the raw bytes it would be a file nothing
+    /// opens, so it is saved as a video instead; see <see cref="VideoExport"/>.
+    /// </remarks>
+    public VideoFormat? Video =>
+        Meta("format") == "rgb24"
+        && int.TryParse(Meta("width"), out var width) && width > 0
+        && int.TryParse(Meta("height"), out var height) && height > 0
+        && int.TryParse(Meta("fps"), out var fps) && fps > 0
+            ? new VideoFormat(width, height, fps)
+            : null;
+
     /// <summary>
     /// A filename to suggest when saving this.
     /// </summary>
@@ -3081,15 +3235,9 @@ public sealed record ArtifactEntry(string Id, string Kind, byte[] Payload, strin
     {
         get
         {
-            foreach (var pair in Metadata.Split(", ", StringSplitOptions.RemoveEmptyEntries))
-            {
-                var split = pair.Split('=', 2);
-                if (split.Length == 2 && split[0].Trim() == "extension" && split[1].Length > 0)
-                {
-                    return $"{Safe(Id)}.{split[1].Trim()}";
-                }
-            }
-            return $"{Safe(Id)}.bin";
+            if (Video is not null) return $"{Safe(Id)}.mp4";
+            var extension = Meta("extension");
+            return $"{Safe(Id)}.{(extension.Length > 0 ? extension : "bin")}";
         }
     }
 

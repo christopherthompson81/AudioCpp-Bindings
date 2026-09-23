@@ -25,6 +25,7 @@ public readonly record struct SaveKind(string Title, string Description, string 
             ["json"] = ("Save data", "JSON"),
             ["mid"] = ("Save MIDI", "MIDI file"),
             ["txt"] = ("Save text", "Text"),
+            ["mp4"] = ("Save video", "MP4 video"),
         };
 
     public static SaveKind For(string suggestedFileName)

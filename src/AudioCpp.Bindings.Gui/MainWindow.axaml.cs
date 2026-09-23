@@ -26,6 +26,14 @@ public partial class MainWindow : Window
         if (path is not null) viewModel.VoiceAudioPath = path;
     }
 
+    /// <summary>Fill a path-valued option -- a reference image, a LoRA -- from a file dialog.</summary>
+    private async void OnPickOptionPath(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: DeclaredOption option }) return;
+        var path = await PickPathAsync(option.Name, directory: false);
+        if (path is not null) option.Value = path;
+    }
+
     private async void OnSaveArtifact(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (sender is Button { Tag: ArtifactEntry artifact }
