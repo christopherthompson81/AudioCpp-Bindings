@@ -112,10 +112,9 @@ internal static class Program
         var dir = Directory.CreateTempSubdirectory("audiocpp-video-check").FullName;
         try
         {
-            var audio = Path.Combine(dir, "driving.wav");
             var tone = new float[16000];
             for (var i = 0; i < tone.Length; i++) tone[i] = 0.2f * MathF.Sin(i * 0.1f);
-            Wav.Write(audio, tone, 16000, 1);
+            (float[], int, int)? audio = (tone, 16000, 1);
 
             foreach (var source in new[] { audio, null })
             {
@@ -138,6 +137,14 @@ internal static class Program
                 Expect($"{Path.GetFileName(target)} audio track {(source is null ? "absent" : "present")}",
                        streams.Contains("audio") == (source is not null));
             }
+
+            // ffmpeg present but failing (here: a container it cannot choose)
+            // must still leave the frames on disk.
+            var failed = await VideoExport.SaveAsync(payload, artifact.Video!, null, Path.Combine(dir, "clip.nosuchformat"));
+            Console.WriteLine($"  {failed}");
+            Expect("a failed encode still writes the raw frames",
+                   failed.StartsWith("ffmpeg failed", StringComparison.Ordinal)
+                   && new FileInfo(Path.Combine(dir, "clip.rgb")).Length == payload.Length);
 
             try
             {
@@ -166,6 +173,11 @@ internal static class Program
     private static int ComponentCheck()
     {
         var failures = 0;
+        void Check(string what, bool ok)
+        {
+            Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {what}");
+            if (!ok) failures++;
+        }
         var families = new (string Family, string[] Files, (string Option, string Default, string[] Expected)[] Options)[]
         {
             ("yue2",
@@ -202,9 +214,10 @@ internal static class Program
                 foreach (var file in files) File.WriteAllBytes(Path.Combine(dir, file), []);
                 File.WriteAllBytes(Path.Combine(dir, "README.md"), []);
                 var defaults = options.Select(o => o.Default).Where(d => d.Length > 0).ToList();
+                var onDisk = DeclaredOption.GgufFiles(dir);
                 foreach (var (option, @default, expected) in options)
                 {
-                    var offered = DeclaredOption.ComponentFiles(option, "string", @default, dir, defaults) ?? [];
+                    var offered = DeclaredOption.ComponentFiles(option, "string", @default, onDisk, defaults) ?? [];
                     var ok = offered.SequenceEqual(expected);
                     Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {option}: {string.Join(", ", offered.Select(f => f.Length > 0 ? f : "(default)"))}");
                     if (!ok)
@@ -222,10 +235,31 @@ internal static class Program
 
         // Not a component: a choice type already has its choices, and a name
         // that is not *_gguf is a string the user types.
-        var notComponents = DeclaredOption.ComponentFiles("yue2.style", "string", "", Path.GetTempPath(), [])
-                            ?? DeclaredOption.ComponentFiles("x.vae_gguf", "a|b", "", Path.GetTempPath(), []);
-        Console.WriteLine($"{(notComponents is null ? "ok  " : "FAIL")} non-component options get no file list");
-        if (notComponents is not null) failures++;
+        var notComponents = DeclaredOption.ComponentFiles("yue2.style", "string", "", ["a.gguf"], [])
+                            ?? DeclaredOption.ComponentFiles("x.vae_gguf", "a|b", "", ["a.gguf"], []);
+        Check("non-component options get no file list", notComponents is null);
+
+        // A precision the stem does not know is still offered -- but never the
+        // other component's files, which is what the fallback used to bring back.
+        var unknown = DeclaredOption.ComponentFiles("yue2.model_gguf", "string", "yue2-3b-q8_0.gguf",
+            ["yue2-3b-weird.gguf", "yue2-vae-f16.gguf"], ["yue2-3b-q8_0.gguf", "yue2-vae-f16.gguf"]) ?? [];
+        Check($"unrecognised precision offered without the VAE ({string.Join(", ", unknown)})",
+              unknown.SequenceEqual(["yue2-3b-q8_0.gguf", "yue2-3b-weird.gguf"]));
+        var iq = DeclaredOption.ComponentFiles("yue2.model_gguf", "string", "yue2-3b-q8_0.gguf",
+            ["yue2-3b-iq4_xs.gguf", "yue2-vae-f16.gguf"], ["yue2-3b-q8_0.gguf", "yue2-vae-f16.gguf"]) ?? [];
+        Check($"iq quantisations share the stem ({string.Join(", ", iq)})",
+              iq.SequenceEqual(["yue2-3b-q8_0.gguf", "yue2-3b-iq4_xs.gguf"]));
+
+        // Choosing a Flash generator has to choose the Flash schedule too.
+        var variant = new DeclaredOption("Session", "auk.variant", "base|flash", "\"base\"", "", false);
+        var generator = new DeclaredOption("Session", "auk.model_gguf", "string", "", "", false,
+            fileChoices: ["", "auk-base-f32.gguf", "auk-flash-q8_0.gguf"]);
+        DeclaredOption.LinkVariants([variant, generator]);
+        generator.Choice = "auk-flash-q8_0.gguf";
+        Check($"a Flash file selects variant=flash (variant '{variant.Value}')", variant.Choice == "flash");
+        generator.Choice = "auk-base-f32.gguf";
+        Check($"a Base file selects variant=base (value '{variant.Value}', cleared as the default)",
+              variant.Choice == "base" && variant.Value == "");
 
         Console.WriteLine(failures == 0 ? "component files OK" : $"component files: {failures} failure(s)");
         return failures == 0 ? 0 : 1;

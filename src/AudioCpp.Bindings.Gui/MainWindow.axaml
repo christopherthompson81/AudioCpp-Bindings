@@ -581,16 +581,26 @@
                 </StackPanel>
               </StackPanel>
 
-              <StackPanel Spacing="10" IsVisible="{Binding AcceptsAudioInput}">
+              <StackPanel Spacing="10" IsVisible="{Binding ShowAudioInput}">
+                <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
+                <TextBlock Text="{Binding [request.sourceAudio], Source={x:Static res:Loc.Current}}" Classes="Label" />
+                <TextBox Text="{Binding AudioPath}"
+                         PlaceholderText="input WAV" />
+                <Button Content="Audio…" Click="OnPickAudio" HorizontalAlignment="Left" />
+              </StackPanel>
+
+              <!-- Generation's own box, not the shared one above: see
+                   GenerationSourcePath for why. -->
+              <StackPanel Spacing="10" IsVisible="{Binding ShowOptionalAudioInput}">
                 <Border Height="1" Background="{DynamicResource AppLine}" Margin="0,2" />
                 <StackPanel Orientation="Horizontal" Spacing="6">
                   <TextBlock Text="{Binding [request.sourceAudio], Source={x:Static res:Loc.Current}}" Classes="Label" />
                   <TextBlock Text="{Binding [request.optional], Source={x:Static res:Loc.Current}}" Classes="Subtle"
-                             IsVisible="{Binding ShowOptionalAudioInput}" VerticalAlignment="Center" />
+                             VerticalAlignment="Center" />
                 </StackPanel>
-                <TextBox Text="{Binding AudioPath}"
-                         PlaceholderText="input WAV" />
-                <Button Content="Audio…" Click="OnPickAudio" HorizontalAlignment="Left" />
+                <TextBox Text="{Binding GenerationSourcePath}"
+                         PlaceholderText="source WAV" />
+                <Button Content="Audio…" Click="OnPickGenerationSource" HorizontalAlignment="Left" />
               </StackPanel>
 
               <StackPanel Spacing="10" IsVisible="{Binding ShowAsrAudioControls}">

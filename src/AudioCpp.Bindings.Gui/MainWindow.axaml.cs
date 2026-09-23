@@ -147,6 +147,11 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel viewModel) await viewModel.PickModelAsync(directory: true);
     }
 
+    private async void OnPickGenerationSource(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel) await viewModel.PickGenerationSourceAsync();
+    }
+
     private async void OnPickAudio(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel viewModel) await viewModel.PickAudioAsync();

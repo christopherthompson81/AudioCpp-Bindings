@@ -1071,7 +1071,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(ShowTextChunking));
             Notify(nameof(ShowAudioInput));
             Notify(nameof(ShowOptionalAudioInput));
-            Notify(nameof(AcceptsAudioInput));
             Notify(nameof(ShowAsrAudioControls));
             Notify(nameof(ShowVoiceDescription));
             Notify(nameof(ShowSpeechLanguage));
@@ -1327,9 +1326,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// </remarks>
     public bool ShowOptionalAudioInput => _task == "gen";
 
-    /// <summary>Whether the audio box is on screen at all, required or not.</summary>
-    public bool AcceptsAudioInput => ShowAudioInput || ShowOptionalAudioInput;
-
     /// <summary>
     /// Live transcription and long-clip chunking are both ASR concerns. Showing
     /// them for diarisation or separation invites setting a control that is
@@ -1378,6 +1374,23 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>The structured result, which the web UI shows beside the transcript.</summary>
     public string ResultJson { get => _resultJson; private set => Set(ref _resultJson, value); }
     public string AudioPath { get => _audioPath; set => Set(ref _audioPath, value); }
+
+    /// <summary>
+    /// The optional clip a generation starts from, apart from <see cref="AudioPath"/>.
+    /// </summary>
+    /// <remarks>
+    /// Not the same box, and not remembered. AudioPath is the recording every
+    /// listening task shares, and it is restored at startup; had generation
+    /// read it, the interview transcribed yesterday would ride along with
+    /// every song asked for today, turning text-to-music into an edit of it.
+    /// </remarks>
+    public string GenerationSourcePath
+    {
+        get => _generationSourcePath;
+        set => Set(ref _generationSourcePath, value);
+    }
+
+    private string _generationSourcePath = "";
 
     /// <summary>
     /// Optional Silero VAD model. When set, ASR runs segment-by-segment instead of
@@ -1468,6 +1481,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         if (picked is not null) AudioPath = picked;
     }
 
+    public async Task PickGenerationSourceAsync()
+    {
+        if (PickPath is null) return;
+        var picked = await PickPath("Select a source WAV", false);
+        if (picked is not null) GenerationSourcePath = picked;
+    }
+
     private async Task LoadAsync()
     {
         Busy = true;
@@ -1555,34 +1575,45 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(ShowSpeechLanguage));
 
             Options.Clear();
+            var declared = Enum.GetValues<AudioCppOptionScope>()
+                .SelectMany(scope => model.GetOptions(scope).Select(option => (Scope: scope, Option: option)))
+                .ToList();
             // Every component option's default, so an option without one can
             // be offered the files no other component claims.
-            var componentDefaults = Enum.GetValues<AudioCppOptionScope>()
-                .SelectMany(model.GetOptions)
-                .Where(option => option.Name.EndsWith("_gguf", StringComparison.Ordinal))
-                .Select(option => option.DefaultValue.Trim('"'))
+            var componentDefaults = declared
+                .Where(d => d.Option.Name.EndsWith("_gguf", StringComparison.Ordinal))
+                .Select(d => d.Option.DefaultValue.Trim('"'))
                 .Where(value => value.Length > 0)
                 .ToList();
-            foreach (var scope in Enum.GetValues<AudioCppOptionScope>())
+            var ggufFiles = DeclaredOption.GgufFiles(ModelPath);
+            foreach (var (scope, option) in declared)
             {
-                foreach (var option in model.GetOptions(scope))
-                {
-                    Options.Add(new DeclaredOption(
-                        scope.ToString(), option.Name, option.ValueName, option.DefaultValue,
-                        option.MinValue.Length > 0 || option.MaxValue.Length > 0
-                            ? $"[{option.MinValue},{option.MaxValue}]"
-                            : "",
-                        option.Required, option.Description, option.MinValue, option.MaxValue,
-                        DeclaredOption.ComponentFiles(
-                            option.Name, option.ValueName, option.DefaultValue, ModelPath,
+                Options.Add(new DeclaredOption(
+                    scope.ToString(), option.Name, option.ValueName, option.DefaultValue,
+                    option.MinValue.Length > 0 || option.MaxValue.Length > 0
+                        ? $"[{option.MinValue},{option.MaxValue}]"
+                        : "",
+                    option.Required, option.Description, option.MinValue, option.MaxValue,
+                    // A load option cannot be passed at all (see below), so a
+                    // picker for one would be a control that does nothing.
+                    scope == AudioCppOptionScope.Load
+                        ? null
+                        : DeclaredOption.ComponentFiles(
+                            option.Name, option.ValueName, option.DefaultValue, ggufFiles,
                             componentDefaults)));
-                }
             }
+            DeclaredOption.LinkVariants(Options);
 
             RequestOptions.Clear();
             SessionOptions.Clear();
             foreach (var option in Options)
             {
+                // Load options stay in the full table but not among the
+                // editors: audiocpp_model_config carries a family, a config, a
+                // weight and a spec override, and no options, so nothing typed
+                // into one could ever reach the engine. LiveAvatar is where
+                // this shows: it resolves its component files at load.
+                if (option.Scope == nameof(AudioCppOptionScope.Load)) continue;
                 (option.Scope == nameof(AudioCppOptionScope.Request)
                     ? RequestOptions : SessionOptions).Add(option);
             }
@@ -1660,6 +1691,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         // result that arrives afterwards belongs to the task that asked for it,
         // not to whatever is on screen when it lands.
         var ranAs = Task;
+        // Read once, here: the box can be edited while a long run is in flight.
+        var generationSource = ShowOptionalAudioInput ? GenerationSourcePath : "";
 
         try
         {
@@ -1684,13 +1717,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 // failed the run with "Select a WAV file first." over a panel
                 // that never showed an audio box.
                 (float[] Samples, int SampleRate, int Channels)? clip = null;
-                if (ShowAudioInput || (ShowOptionalAudioInput && AudioPath.Length > 0))
+                if (ShowAudioInput)
                 {
                     if (AudioPath.Length == 0)
                         throw new InvalidOperationException("Select a WAV file first.");
                     clip = Wav.Read(AudioPath);
-                    _inputClip = clip;
                 }
+                else if (generationSource.Length > 0)
+                {
+                    clip = Wav.Read(generationSource);
+                }
+                // Every run, clip or not: a run without one previewing the
+                // clip an earlier run was given would be showing someone else's input.
+                _inputClip = clip;
 
                 // One session per task/backend/threads combination, reused across runs.
                 var sessionOptions = Options
@@ -1778,7 +1817,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 {
                     // Symmetric with the audio check: a task that shows a text box
                     // and nothing else has nothing to run without it.
-                    if (Text.Length == 0 && !ShowAudioInput)
+                    // A generation given a clip (LiveAvatar's driving audio) may
+                    // have nothing to add in words.
+                    if (Text.Length == 0 && clip is null)
                         throw new InvalidOperationException("Enter some text first.");
                     if (Text.Length > 0)
                     {
@@ -1856,7 +1897,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     {
                         // A video made from a recording is saved with it: the
                         // frames alone are a silent film of someone talking.
-                        SourceAudio = clip is not null ? AudioPath : null,
+                        SourceClip = clip,
                     });
                 }
             });
@@ -2719,7 +2760,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (artifact.Video is { } video)
             {
                 Status = $"Encoding {path}…";
-                Status = await VideoExport.SaveAsync(artifact.Payload, video, artifact.SourceAudio, path);
+                Status = await VideoExport.SaveAsync(artifact.Payload, video, artifact.SourceClip, path);
                 return;
             }
             await File.WriteAllBytesAsync(path, artifact.Payload);
@@ -3071,28 +3112,68 @@ public sealed class DeclaredOption(
     /// precision and not the conditioner or the VAE.
     /// </remarks>
     public static IReadOnlyList<string>? ComponentFiles(
-        string name, string type, string @default, string modelPath,
+        string name, string type, string @default, IReadOnlyList<string> directoryFiles,
         IReadOnlyCollection<string> componentDefaults)
     {
         if (type.Contains('|') || !name.EndsWith("_gguf", StringComparison.Ordinal)) return null;
-        var root = Directory.Exists(modelPath) ? modelPath : Path.GetDirectoryName(modelPath);
-        if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return null;
 
-        var files = Directory.EnumerateFiles(root, "*.gguf")
-            .Select(file => Path.GetFileName(file))
-            .Order(StringComparer.Ordinal)
-            .ToList();
         var fallback = @default.Trim('"');
+        var unclaimed = directoryFiles
+            .Where(file => componentDefaults.All(taken => Stem(file) == Stem(fallback) || Stem(file) != Stem(taken)))
+            .ToList();
         var mine = fallback.Length > 0
-            ? files.Where(file => Stem(file) == Stem(fallback)).ToList()
-            : files.Where(file => componentDefaults.All(taken => Stem(file) != Stem(taken))).ToList();
-        // Nothing recognisable is not a reason to hide the directory.
-        if (mine.Count > 0) files = mine;
+            ? directoryFiles.Where(file => Stem(file) == Stem(fallback)).ToList()
+            : unclaimed;
+        // A precision the stem does not recognise should still be offered, but
+        // never another component's files: that is the mistake this exists
+        // to prevent.
+        var files = mine.Count > 0 ? mine : unclaimed;
         if (files.Count == 0) return null;
         // With no declared default the engine picks one itself, and a blank
         // entry is how to go back to that after choosing a file.
         if (!files.Contains(fallback)) files.Insert(0, fallback);
         return files;
+    }
+
+    /// <summary>The GGUFs at the model root, once per load rather than once per option.</summary>
+    public static IReadOnlyList<string> GgufFiles(string modelPath)
+    {
+        var root = Directory.Exists(modelPath) ? modelPath : Path.GetDirectoryName(modelPath);
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return [];
+        return Directory.EnumerateFiles(root, "*.gguf")
+            .Select(file => Path.GetFileName(file))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Keep a family's variant switch in step with the component file chosen.
+    /// </summary>
+    /// <remarks>
+    /// AuK's generator can be Base or Flash, and which schedule and config run
+    /// is a separate <c>variant</c> option that defaults to base. Picking a
+    /// Flash file and leaving the variant alone loads Flash weights under the
+    /// Base config -- which passes the shape checks and runs, wrongly. Upstream
+    /// sets the variant from the file name; so does this, by looking for one
+    /// of the variant's own choices as a word in the file's name, so nothing
+    /// here names AuK.
+    /// </remarks>
+    public static void LinkVariants(IReadOnlyList<DeclaredOption> options)
+    {
+        var variant = options.FirstOrDefault(o =>
+            o.IsChoice && o.FileChoices.Count == 0
+            && (o.Name == "variant" || o.Name.EndsWith(".variant", StringComparison.Ordinal)));
+        if (variant is null) return;
+
+        foreach (var component in options.Where(o => o.FileChoices.Count > 0))
+        {
+            component.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName != nameof(Value) || component.Value.Length == 0) return;
+                var words = Stem(component.Value).Split(['-', '_', '.']);
+                if (variant.Choices.FirstOrDefault(words.Contains) is { } match) variant.Choice = match;
+            };
+        }
     }
 
     /// <summary>A GGUF's name without its extension and precision suffixes.</summary>
@@ -3101,7 +3182,7 @@ public sealed class DeclaredOption(
         PrecisionSuffix.Replace(Path.GetFileNameWithoutExtension(file).ToLowerInvariant(), "");
 
     private static readonly System.Text.RegularExpressions.Regex PrecisionSuffix = new(
-        @"(?:[-_.](?:f32|f16|bf16|fp32|fp16|nvfp4|mxfp4|orig|q\d+(?:_[0-9a-z]+)*))+$",
+        @"(?:[-_.](?:f32|f16|bf16|fp32|fp16|nvfp4|mxfp4|orig|i?q\d+(?:_[0-9a-z]+)*))+$",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>
@@ -3184,8 +3265,11 @@ public sealed record ArtifactEntry(string Id, string Kind, byte[] Payload, strin
     public string Summary => $"{Kind} · {Payload.Length} bytes"
                              + (Metadata.Length > 0 ? $" · {Metadata}" : "");
 
-    /// <summary>The recording the run was given, if any.</summary>
-    public string? SourceAudio { get; init; }
+    /// <summary>
+    /// The recording the run was given, as it was read then -- not a path,
+    /// which may name a different file, or none, by the time this is saved.
+    /// </summary>
+    public (float[] Samples, int SampleRate, int Channels)? SourceClip { get; init; }
 
     /// <summary>One value from the model's metadata, or empty.</summary>
     public string Meta(string key)

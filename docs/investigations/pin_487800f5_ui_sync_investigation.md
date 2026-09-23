@@ -19,7 +19,24 @@ Spec task names include `edit` and `sfx`, but the engine's
 
 Implication: build and run the suite. No binding changes are expected.
 
-## Run 2 — 2026-09-23 ~09:05
+## Run 2 — 2026-09-23 ~08:50 (reading the web UI diff)
+
+`git diff 5db449ef..487800f5 -- webui`: 21 files. Most of it is curation that
+this app gets from the ABI and does not copy: new catalog rows (families
+arrive through model_specs), model_params.json control lists, and per-family
+branches in `+page.svelte`. What does translate:
+
+| upstream | here |
+| --- | --- |
+| `workflow.music` → "Music / video generation" | resx English matched, locales re-imported |
+| gen takes an optional source clip (AuK edit, LiveAvatar driving audio) | `ShowOptionalAudioInput`; never demanded |
+| AuK/YuE2/LiveAvatar component selectors (hand-listed choices) | `*_gguf` string options list the model dir's GGUFs |
+| LiveAvatar reference-image / YuE2 LoRA upload | Browse button on path options |
+| LiveAvatar rgb24 frames → MP4 in browser (mediabunny) | ffmpeg on save, muxed with the source clip |
+| confucius4_r2t2 added to live ASR list | nothing to do: live is attempted for any ASR model and the engine refuses if it cannot |
+| `arena: false` on AuK | nothing to do: our Arena is path-based, not catalog-filtered |
+
+## Run 3 — 2026-09-23 ~09:05
 
 ```
 ./scripts/build-engine.sh --ccache --cuda-arch native -DENGINE_ENABLE_CUDA=ON
@@ -36,23 +53,6 @@ C and C# agree on 11 reported values
 
 This is the same count as the previous pin. The package catalog check passes
 with the renamed spec.
-
-## Run 3 — 2026-09-23 ~08:50 (reading the web UI diff)
-
-`git diff 5db449ef..487800f5 -- webui`: 21 files. Most of it is curation that
-this app gets from the ABI and does not copy: new catalog rows (families
-arrive through model_specs), model_params.json control lists, and per-family
-branches in `+page.svelte`. What does translate:
-
-| upstream | here |
-| --- | --- |
-| `workflow.music` → "Music / video generation" | resx English matched, locales re-imported |
-| gen takes an optional source clip (AuK edit, LiveAvatar driving audio) | `ShowOptionalAudioInput`; never demanded |
-| AuK/YuE2/LiveAvatar component selectors (hand-listed choices) | `*_gguf` string options list the model dir's GGUFs |
-| LiveAvatar reference-image / YuE2 LoRA upload | Browse button on path options |
-| LiveAvatar rgb24 frames → MP4 in browser (mediabunny) | ffmpeg on save, muxed with the source clip |
-| confucius4_r2t2 added to live ASR list | nothing to do: live is attempted for any ASR model and the engine refuses if it cannot |
-| `arena: false` on AuK | nothing to do: our Arena is path-based, not catalog-filtered |
 
 ## Run 4 — 2026-09-23 09:20
 
@@ -116,3 +116,41 @@ truncated payload is refused rather than encoded.
 
 Not verified: a real LiveAvatar or AuK run. Neither model is installed here,
 and LiveAvatar's 14B denoiser is its own download.
+
+## Run 8 — 2026-09-23 ~10:00 (review of #90)
+
+`/code-review high` raised ten findings. All ten held up against the code:
+
+- **An old recording was sent with every generation.** The optional clip read
+  `AudioPath`, which every listening task shares and which settings restore at
+  startup. Generation now has its own box, `GenerationSourcePath`, which is not
+  saved. Checked in the window with `audio=` set to an ASR clip: the generation
+  box stays empty.
+- `Enter some text first.` refused a clip-only generation (LiveAvatar with no
+  prompt). The guard is now `clip is null`.
+- An ffmpeg that starts but fails (no libx264, say) threw, so the frames could
+  never be saved. It now falls back to raw frames plus ffmpeg's message.
+  `--video-check` forces this with an output format ffmpeg cannot pick.
+- **Load-scope options were shown as editable.** `audiocpp_model_config`
+  carries no options, so they can never reach the engine. They now appear only
+  in the full table. This matters for LiveAvatar: it resolves `*_gguf` in
+  `load_liveavatar_assets(request.model_path, request.options)` at load, so
+  **through the C ABI its component pickers cannot take effect in either
+  scope.** That is a binding gap to take upstream, not something the app can
+  fix. YuE2 (`session.cpp:105`) and AuK (`session.cpp:121`) read theirs at
+  session creation and are unaffected.
+- The MP4's soundtrack was read from a path at save time. It now uses the
+  in-memory clip the run actually used.
+- AuK: a Flash file with `variant` left at base loads Flash weights under the
+  Base config and runs. `LinkVariants` now sets the variant from a word in the
+  chosen file's name (no family names in the code).
+- The stem fallback offered the whole directory again, VAE included. It now
+  offers only the unclaimed files, and `iq*` counts as a precision.
+- `_inputClip` survived runs without a clip, so Play replayed an earlier input.
+  It is now reset on every run.
+- Options were fetched twice and the directory was listed once per option. Both
+  now happen once.
+- This log was out of order; Runs 2 and 3 are swapped.
+
+`--component-check` gained the unrecognised-precision, `iq`, and variant
+cases. All the checks and the window shot pass.
