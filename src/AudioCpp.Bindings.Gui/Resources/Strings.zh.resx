@@ -89,6 +89,9 @@
   <data name="request.optional" xml:space="preserve">
     <value>可选</value>
   </data>
+  <data name="request.prompt" xml:space="preserve">
+    <value>提示词</value>
+  </data>
   <data name="request.sourceAudio" xml:space="preserve">
     <value>源音频</value>
   </data>

@@ -89,6 +89,9 @@
   <data name="request.optional" xml:space="preserve">
     <value>任意</value>
   </data>
+  <data name="request.prompt" xml:space="preserve">
+    <value>プロンプト</value>
+  </data>
   <data name="request.sourceAudio" xml:space="preserve">
     <value>入力音声</value>
   </data>

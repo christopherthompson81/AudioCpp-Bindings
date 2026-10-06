@@ -313,10 +313,24 @@ internal static class Program
                                || o.Name.StartsWith("semantic_", StringComparison.Ordinal)
                                   && !o.Name.Contains("prefix")) == 14);
         var byName = extra.ToDictionary(o => o.Name);
-        Check("a bounded float is a slider", byName["abc_temperature"].IsSlider);
+        Check("a bounded float with no default is a spinner, not a slider", byName["abc_temperature"].IsNumber);
         Check("a half-bounded int is a spinner", byName["semantic_top_k"].IsNumber);
         Check("a token list is long text", byName["semantic_prefix"].IsLongText);
         Check("a file is a path", byName["nar_noise_file"].IsPath && !byName["nar_noise_file"].IsLongText);
+        // A list copied from the spec (most families) offers nothing extra:
+        // the engine would refuse an option its embedded spec does not name.
+        var copied = documented.Take(5)
+            .Select(o => new DeclaredOption("Request", o.Name, o.Type, o.Default, "", o.Required, o.Description))
+            .ToList();
+        Check("a spec-derived ABI list gets no spec-only options",
+              DeclaredOption.SpecOnly(documented, copied).Count == 0);
+        var noDefault = byName["semantic_max_tokens"];
+        Check($"no default: a spinner, empty until set ({noDefault.Editor}, {noDefault.NumberValue?.ToString() ?? "null"})",
+              noDefault.IsNumber && noDefault.NumberValue is null && !byName["abc_temperature"].IsSlider);
+        noDefault.NumberValue = 250;
+        noDefault.NumberValue = null;
+        Check("clearing it hands the choice back to the engine", noDefault.Value == "");
+
         Check("a prefixed ABI name suppresses the bare spec one",
               !DeclaredOption.SpecOnly(documented, [new DeclaredOption("Request", "yue2.cot", "a|b", "", "", false)])
                   .Any(o => o.Name == "cot"));

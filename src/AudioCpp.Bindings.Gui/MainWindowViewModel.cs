@@ -707,6 +707,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             // the indexer refresh that covers the XAML bindings.
             Notify(nameof(PlayLabel));
             Notify(nameof(RecordLabel));
+            Notify(nameof(PromptLabel));
         }
     }
 
@@ -1079,7 +1080,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Notify(nameof(ShowAsrAudioControls));
             Notify(nameof(ShowVoiceDescription));
             Notify(nameof(ShowSpeechLanguage));
-            NotifyPromptInputs();
+            NotifyPromptVisibility();
             RecordCommand.RaiseCanExecuteChanged();
         }
     }
@@ -1323,12 +1324,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// keep the Text box.
     /// </remarks>
     /// <remarks>
-    /// Found whatever the task, because the option rows are built once at load
-    /// and must leave it out even when the window was on another task then;
+    /// Settled at load whatever the task, because the option rows are built
+    /// then and must leave it out even when the window was on another task;
     /// <see cref="ShowPrompt"/> is what follows the task.
     /// </remarks>
-    public DeclaredOption? PromptOption =>
-        Options.FirstOrDefault(o => o is { Required: true, IsText: true, IsPath: false }
+    public DeclaredOption? PromptOption { get; private set; }
+
+    private static DeclaredOption? FindPromptOption(IEnumerable<DeclaredOption> options) =>
+        options.FirstOrDefault(o => o is { Required: true, IsText: true, IsPath: false }
                                     && o.Scope == nameof(AudioCppOptionScope.Request)
                                     && o.Name is "style" or "prompt" or "caption" or "tags");
 
@@ -1340,16 +1343,22 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// option, and a song's words do not fit the one-line editor every other
     /// string option gets. Empty is how YuE2 is asked for an instrumental.
     /// </remarks>
-    public DeclaredOption? LyricsOption =>
-        Options.FirstOrDefault(o => o.Name == "lyrics" && o.Scope == nameof(AudioCppOptionScope.Request));
+    public DeclaredOption? LyricsOption { get; private set; }
 
     public bool ShowPrompt => _task == "gen" && PromptOption is not null;
     public bool ShowLyrics => _task == "gen" && LyricsOption is not null;
 
-    /// <summary>The prompt option's name as a heading: "Style".</summary>
-    public string PromptLabel => PromptOption is { } option
-        ? char.ToUpperInvariant(option.Name[0]) + option.Name[1..]
-        : "";
+    /// <summary>The prompt option's name as a heading: "Style", translated where there is one.</summary>
+    public string PromptLabel
+    {
+        get
+        {
+            if (PromptOption is not { } option) return "";
+            var key = $"request.{option.Name}";
+            var translated = Resources.Strings.Get(key);
+            return translated != key ? translated : char.ToUpperInvariant(option.Name[0]) + option.Name[1..];
+        }
+    }
 
     /// <summary>MiniMax Music 3 cannot sing nothing; YuE2 and HeartMuLa can.</summary>
     public bool LyricsRequired => LyricsOption is { Required: true };
@@ -1366,17 +1375,26 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool HasSpecOptions => SpecOptions.Count > 0;
 
-    private void NotifyPromptInputs()
+    /// <summary>What follows the task: the boxes, and the Text box they replace.</summary>
+    private void NotifyPromptVisibility()
     {
-        Notify(nameof(PromptOption));
-        Notify(nameof(LyricsOption));
         Notify(nameof(ShowPrompt));
         Notify(nameof(ShowLyrics));
+    }
+
+    /// <summary>Settle the prompt and lyrics options for a newly loaded (or unloaded) model.</summary>
+    private void SetPromptInputs(DeclaredOption? prompt, DeclaredOption? lyrics)
+    {
+        PromptOption = prompt;
+        LyricsOption = lyrics;
+        Notify(nameof(PromptOption));
+        Notify(nameof(LyricsOption));
         Notify(nameof(PromptLabel));
         Notify(nameof(LyricsRequired));
+        Notify(nameof(HasSpecOptions));
+        NotifyPromptVisibility();
         Notify(nameof(ShowText));
         Notify(nameof(ShowSpeechLanguage));
-        Notify(nameof(HasSpecOptions));
     }
 
     /// <summary>A voice only means something to a family that produces one.</summary>
@@ -1691,8 +1709,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             RequestOptions.Clear();
             SessionOptions.Clear();
             SpecOptions.Clear();
-            var prompt = PromptOption;
-            var lyrics = LyricsOption;
+            var prompt = FindPromptOption(Options);
+            var lyrics = Options.FirstOrDefault(o => o.Name == "lyrics" && o.Scope == nameof(AudioCppOptionScope.Request));
             foreach (var option in Options)
             {
                 // Edited in boxes of their own, above.
@@ -1727,7 +1745,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 Task = preferred;
                 Notify(nameof(SelectedTaskIndex));
             }
-            NotifyPromptInputs();
+            SetPromptInputs(prompt, lyrics);
             Notify(nameof(SelectedChip));
             Notify(nameof(LoadedModelName));
             Notify(nameof(LoadedModelState));
@@ -1746,7 +1764,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             ModelSummary = "";
             Options.Clear();
             SpecOptions.Clear();
-            NotifyPromptInputs();
+            SetPromptInputs(null, null);
             Fail(exception, "load");
         }
         finally
@@ -1801,6 +1819,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             var sessionMs = 0L;
             var runMs = 0L;
             string transcript = "";
+
+            // A required prompt in an option of its own (YuE2's style) is
+            // checked before any session is built: it is the window's state
+            // alone, and a cold YuE2 session takes seconds to build only to be
+            // refused. Lyrics may be empty, which is an instrumental.
+            foreach (var demanded in new[] { ShowPrompt ? PromptOption : null, ShowLyrics ? LyricsOption : null })
+            {
+                if (demanded is { Required: true } && demanded.Value.Trim().Length == 0
+                    && demanded.DefaultDisplay.Length == 0)
+                    throw new InvalidOperationException($"Enter the {demanded.Name} first.");
+            }
 
             await System.Threading.Tasks.Task.Run(() =>
             {
@@ -1910,16 +1939,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     }
                 }
 
-                // A required prompt in an option of its own (YuE2's style) is
-                // checked here, where the Text box's own check would have been;
-                // lyrics may be empty, which is an instrumental.
-                foreach (var demanded in new[] { ShowPrompt ? PromptOption : null, ShowLyrics ? LyricsOption : null })
-                {
-                    if (demanded is { Required: true } && demanded.Value.Trim().Length == 0
-                        && demanded.DefaultDisplay.Length == 0)
-                        throw new InvalidOperationException($"Enter the {demanded.Name} first.");
-                }
-
                 if (ShowText)
                 {
                     // Symmetric with the audio check: a task that shows a text box
@@ -1938,7 +1957,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 // would have been offered and then dropped. The ABI writes the
                 // option itself for a non-empty language on SetText, so this
                 // covers the tasks that path does not reach.
-                if (!ShowText && SpeechLanguage.Length > 0)
+                // Only where the picker is shown: YuE2 hides it, and a language
+                // kept from the previous model must not ride along unseen.
+                if (!ShowText && ShowSpeechLanguage && SpeechLanguage.Length > 0)
                 {
                     request.SetOption("language", SpeechLanguage);
                 }
@@ -2475,7 +2496,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RequestOptions.Clear();
         SessionOptions.Clear();
         SpecOptions.Clear();
-        NotifyPromptInputs();
+        SetPromptInputs(null, null);
         Rows.Clear();
         Transcript = "";
         ResultJson = "";
@@ -2864,7 +2885,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     /// Feeding that back as the <c>abc</c> option keeps the melody while the
     /// seed, style or lyrics change, which is the edit loop the web UI's score
     /// editor exists for. With planning off the engine ignores a score, so
-    /// that is moved to melody, as upstream does when it imports one.
+    /// that is moved to melody, as upstream does when it imports one; and a
+    /// score-only stop is moved to audio, which the engine demands.
     /// </remarks>
     public void UseScore(ArtifactEntry artifact)
     {
@@ -2880,6 +2902,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             && cot.Choices.Contains("melody"))
         {
             cot.Choice = "melody";
+        }
+        // A score-only run is how the score was made, and the engine refuses
+        // one that is handed a score ("generates no score when abc is
+        // supplied"), so the next run renders the song instead.
+        if (Options.FirstOrDefault(o => o.Name == "stop_after" && o.IsChoice) is { Choice: "abc" } stop
+            && stop.Choices.Contains("audio"))
+        {
+            stop.Choice = "audio";
         }
         Status = $"Score from {artifact.Id} set as the abc option.";
     }
@@ -3191,10 +3221,16 @@ public sealed class DeclaredOption(
     /// every family, so the editors are derived from that instead. It works
     /// everywhere and cannot drift from the engine.
     /// </remarks>
+    /// <para>
+    /// A slider needs a default to sit at. Without one (YuE2's spec-only
+    /// sampling controls) a slider would show its minimum and send it on the
+    /// first touch, so the option gets a spinner that can be left empty.
+    /// </para>
     public OptionEditor Editor => Type.Contains('|') || FileChoices.Count > 0 ? OptionEditor.Choice
         : Type is "bool" ? OptionEditor.Toggle
         : Type is "int" or "float" or "number"
-            ? (Min.Length > 0 && Max.Length > 0 ? OptionEditor.Slider : OptionEditor.Number)
+            ? (Min.Length > 0 && Max.Length > 0 && DefaultDisplay.Length > 0
+                ? OptionEditor.Slider : OptionEditor.Number)
             : OptionEditor.Text;
 
     /// <summary>
@@ -3305,11 +3341,31 @@ public sealed class DeclaredOption(
     /// account, and the two disagree in places (YuE2's cot defaults to off by
     /// the ABI, full by the spec).
     /// </remarks>
+    /// <para>
+    /// Only for a family whose ABI list is written by hand. Most families'
+    /// lists are the spec embedded in their GGUF, copied description and all,
+    /// and the engine refuses a request option that spec does not name. For
+    /// those, any spec-only option is this checkout's spec being newer than the
+    /// installed model's, and offering it offers a run that fails. Copied
+    /// descriptions give them away: every shared one matches, where YuE2's
+    /// hand-written list matches its spec on one in ten (seed).
+    /// </para>
     public static List<DeclaredOption> SpecOnly(
         IEnumerable<SpecOption> documented, IEnumerable<DeclaredOption> declared)
     {
-        var known = declared.Select(o => o.Name).ToList();
-        return documented
+        var declaredList = declared.ToList();
+        var documentedList = documented.ToList();
+        var shared = declaredList
+            .Where(o => o.Scope == nameof(AudioCppOptionScope.Request))
+            .Select(o => (Declared: o, Spec: documentedList.FirstOrDefault(d => d.Name == o.Name)))
+            .Where(pair => pair.Spec is not null)
+            .ToList();
+        if (shared.Count > 0
+            && shared.Count(pair => pair.Spec!.Description == pair.Declared.Description) * 2 >= shared.Count)
+            return [];
+
+        var known = declaredList.Select(o => o.Name).ToList();
+        return documentedList
             .Where(extra => !known.Any(name =>
                 name == extra.Name || name.EndsWith("." + extra.Name, StringComparison.Ordinal)))
             .Select(extra => new DeclaredOption(
@@ -3398,11 +3454,18 @@ public sealed class DeclaredOption(
             ? "" : value.ToString().ToLowerInvariant();
     }
 
-    public double NumberValue
+    /// <summary>
+    /// The number, or null when neither the user nor the model has given one,
+    /// so the spinner shows empty and clearing it hands the choice back to the
+    /// engine rather than sending 0.
+    /// </summary>
+    public double? NumberValue
     {
         get => double.TryParse(_value.Length > 0 ? _value : DefaultDisplay,
-                   System.Globalization.CultureInfo.InvariantCulture, out var number) ? number : 0;
-        set => Value = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                   System.Globalization.CultureInfo.InvariantCulture, out var number) ? number : null;
+        set => Value = value is { } number
+            ? number.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "";
     }
 
     public double NumberMin =>
@@ -3415,7 +3478,8 @@ public sealed class DeclaredOption(
     public double NumberStep => Type == "int" ? 1 : 0.1;
 
     /// <summary>Name plus the default, which is what a user needs to see beside a control.</summary>
-    public string Label => DefaultDisplay.Length > 0 ? $"{Name}   (default {DefaultDisplay})" : Name;
+    public string Label => DefaultDisplay.Length > 0 ? $"{Name}   (default {DefaultDisplay})"
+        : IsNumber ? $"{Name}   (empty: model decides)" : Name;
 
     public string Value
     {

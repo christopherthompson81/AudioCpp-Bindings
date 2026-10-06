@@ -89,6 +89,9 @@
   <data name="request.optional" xml:space="preserve">
     <value>opzionale</value>
   </data>
+  <data name="request.prompt" xml:space="preserve">
+    <value>Prompt</value>
+  </data>
   <data name="request.sourceAudio" xml:space="preserve">
     <value>Audio sorgente</value>
   </data>

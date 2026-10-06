@@ -687,7 +687,7 @@
 
               <!-- What the family's spec documents and the ABI does not
                    declare: for YuE2, the semantic and ABC-planner sampling. -->
-              <Expander Header="More options from the model spec" IsVisible="{Binding HasSpecOptions}">
+              <Expander Header="{Binding [options.fromSpec], Source={x:Static res:Loc.Current}}" IsVisible="{Binding HasSpecOptions}">
                 <ItemsControl ItemsSource="{Binding SpecOptions}" Margin="0,8,0,0"
                               ItemTemplate="{StaticResource OptionRow}" />
               </Expander>
@@ -801,7 +801,7 @@
                                    taken out of the app. -->
                               <!-- A planner's score, fed back to keep its melody. -->
                               <Button Grid.Column="1" VerticalAlignment="Top" Margin="0,0,6,0"
-                                      Content="Use as score" IsVisible="{Binding IsScore}"
+                                      Content="{Binding [action.useScore], Source={x:Static res:Loc.Current}}" IsVisible="{Binding IsScore}"
                                       Click="OnUseScore" Tag="{Binding}" />
                               <Button Grid.Column="2" VerticalAlignment="Top"
                                       Content="{Binding [action.save], Source={x:Static res:Loc.Current}}"

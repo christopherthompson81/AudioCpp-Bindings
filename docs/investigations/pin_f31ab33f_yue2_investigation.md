@@ -128,3 +128,49 @@ Left as is:
   YuE2's own, but only within one loaded model's results.
 - No sheet-music preview: the web UI renders ABC with abcjs, and Avalonia has
   no equivalent.
+
+## Run 6 — 2026-10-06 ~14:00 (review of #91)
+
+`/code-review high` raised ten findings. Verified against the code and the
+engine source before fixing:
+
+- **Use as score broke the score-only loop.** `request.cpp:192` refuses
+  `stop_after=abc` with a score supplied, and a score-only run is how the score
+  was made. UseScore now moves `stop_after` to `audio`; the live check no
+  longer does it by hand, so it proves the button does.
+- **Spec-only numbers with no default showed 0** (max tokens 0, a temperature
+  slider at 0), and once set could not be unset. `NumberValue` is now nullable:
+  empty means the model decides, and clearing returns to that. A bounded
+  number with no default gets a spinner, not a slider, which would sit at its
+  minimum and send it on the first touch.
+- **The spec merge could offer options the engine refuses.** Confirmed: most
+  families' ABI lists come from the GGUF's embedded spec via `cli_from_spec`
+  (`metadata.cpp:262`), copying descriptions verbatim, and families like AuK
+  and Parakeet call `validate_spec_backed_request_options`. With a model whose
+  embedded spec is older than this checkout, the extras would fail the run.
+  Measured: YuE2's hand-written list matches its spec on 1 description of 10
+  (`seed`); a copied list matches all. `SpecOnly` now offers nothing when at
+  least half the shared descriptions match.
+- A language kept from an earlier model was still sent when YuE2 hid the
+  picker. The ASR-style branch now requires `ShowSpeechLanguage`.
+- The workflow check would have called gen "no input" with YuE2 loaded; it now
+  counts the Style and Lyrics boxes.
+- The pseudo-locale was stale (87 of 89 keys). Regenerated: 93 of 93.
+- The expander header, "Use as score" and the Style heading are now resource
+  strings (`options.fromSpec`, `action.useScore`, `request.style`;
+  `request.prompt` is shared with upstream, so it carries translations).
+  Errors and status lines stay English, like the rest of the app's.
+- The empty-style check ran after the session was built. It now runs first.
+  The live run shows the change: the score-only run now pays the 1.6 s session
+  build that the refused run used to pay.
+- Prompt and lyrics options are found once at load, not on each read, and the
+  task setter no longer raises ShowText twice.
+
+Not changed: the review's altitude point, that the real fix is upstream
+(`yue2_cli_interface()` should declare what `apply_options` reads), is right.
+The spec merge is a stopgap until then, and the description test keeps it to
+families whose lists are written by hand.
+
+All checks pass: spec-options (now with spec-derived and no-default cases),
+component, save, settings, video, strings, workflow, and `--yue2-check` on
+CUDA.

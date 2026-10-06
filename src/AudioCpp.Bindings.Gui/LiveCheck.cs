@@ -330,13 +330,16 @@ internal static class LiveCheck
                             viewModel.UseScore(score);
                             Expect("Use as score fills abc",
                                    Option("abc").Value == System.Text.Encoding.UTF8.GetString(score.Payload));
+                            // The engine refuses a score-only run handed a score,
+                            // so the button has to move it on; nothing below does.
+                            Expect($"and moves stop_after off abc ({Option("stop_after").Choice})",
+                                   Option("stop_after").Choice == "audio");
                         }
 
                         // Instrumental, from that score, cut short by a control
                         // only the spec declares: if semantic_max_tokens did not
                         // reach the engine the song would run to its full length.
                         viewModel.LyricsOption.Value = "";
-                        Option("stop_after").Choice = "audio";
                         Option("semantic_max_tokens").NumberValue = 250;
                         Option("semantic_min_tokens").NumberValue = 0;
                         await viewModel.RunCommand.ExecuteAsync();
@@ -928,7 +931,9 @@ internal static class LiveCheck
                         Console.WriteLine($"  {task,-6} {Resources.Strings.TaskName(task),-26} {shape}");
                         layouts.Add(shape);
 
-                        if (!viewModel.ShowText && !viewModel.ShowAudioInput)
+                        // YuE2's Style and Lyrics boxes are its inputs in place of Text.
+                        if (!viewModel.ShowText && !viewModel.ShowAudioInput
+                            && !viewModel.ShowPrompt && !viewModel.ShowLyrics)
                         {
                             Console.Error.WriteLine($"  {task} offers no input at all"); failures++;
                         }
