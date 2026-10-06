@@ -82,6 +82,11 @@ internal static class Program
             return ComponentCheck();
         }
 
+        if (args.Contains("--spec-options-check"))
+        {
+            return SpecOptionsCheck();
+        }
+
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         return 0;
     }
@@ -262,6 +267,80 @@ internal static class Program
               variant.Choice == "base" && variant.Value == "");
 
         Console.WriteLine(failures == 0 ? "component files OK" : $"component files: {failures} failure(s)");
+        return failures == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// The spec's request options fill in what the ABI leaves undeclared, and
+    /// only that. The declared list is YuE2's <c>yue2_cli_interface()</c> as
+    /// the pinned engine has it; the documented one is the real spec file.
+    /// </summary>
+    private static int SpecOptionsCheck()
+    {
+        var failures = 0;
+        void Check(string what, bool ok)
+        {
+            Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {what}");
+            if (!ok) failures++;
+        }
+
+        var specs = MainWindowViewModel.FindModelSpecs();
+        Check($"model_specs found ({specs})", specs is not null);
+        if (specs is null) return 1;
+        var yue2 = AudioCpp.Packages.Catalog.Load(specs).Families.FirstOrDefault(f => f.Family == "yue2");
+        Check("yue2 spec parsed", yue2 is not null);
+        if (yue2 is null) return 1;
+        var documented = yue2.RequestOptions ?? [];
+        Check($"spec documents {documented.Count} request options", documented.Count >= 27);
+        var cot = documented.FirstOrDefault(o => o.Name == "cot");
+        Check($"an enum becomes a choice ({cot?.Type}, default {cot?.Default})",
+              cot is { Type: "off|melody|full", Default: "full" });
+        var temperature = documented.FirstOrDefault(o => o.Name == "abc_temperature");
+        Check($"numeric bounds kept ({temperature?.Min}..{temperature?.Max})",
+              temperature is { Min: "0.0", Max: "5.0" });
+
+        string[] request = ["style", "lyrics", "abc", "abc_file", "cot", "export_semantic", "stop_after",
+                            "seed", "guidance_scale", "num_inference_steps"];
+        var declared = request.Select(name => new DeclaredOption("Request", name, "string", "", "", false))
+            .Append(new DeclaredOption("Session", "yue2.model_gguf", "string", "", "", false))
+            .ToList();
+        var extra = DeclaredOption.SpecOnly(documented, declared);
+        Console.WriteLine($"     spec-only: {string.Join(", ", extra.Select(o => o.Name))}");
+        Check($"none the ABI declares comes back ({extra.Count})",
+              !extra.Any(o => request.Contains(o.Name)) && extra.All(o => o.FromSpec));
+        Check("the fourteen sampling controls are among them",
+              extra.Count(o => o.Name.StartsWith("abc_", StringComparison.Ordinal)
+                               || o.Name.StartsWith("semantic_", StringComparison.Ordinal)
+                                  && !o.Name.Contains("prefix")) == 14);
+        var byName = extra.ToDictionary(o => o.Name);
+        Check("a bounded float with no default is a spinner, not a slider", byName["abc_temperature"].IsNumber);
+        Check("a half-bounded int is a spinner", byName["semantic_top_k"].IsNumber);
+        Check("a token list is long text", byName["semantic_prefix"].IsLongText);
+        Check("a file is a path", byName["nar_noise_file"].IsPath && !byName["nar_noise_file"].IsLongText);
+        // A list copied from the spec (most families) offers nothing extra:
+        // the engine would refuse an option its embedded spec does not name.
+        var copied = documented.Take(5)
+            .Select(o => new DeclaredOption("Request", o.Name, o.Type, o.Default, "", o.Required, o.Description))
+            .ToList();
+        Check("a spec-derived ABI list gets no spec-only options",
+              DeclaredOption.SpecOnly(documented, copied).Count == 0);
+        var noDefault = byName["semantic_max_tokens"];
+        Check($"no default: a spinner, empty until set ({noDefault.Editor}, {noDefault.NumberValue?.ToString() ?? "null"})",
+              noDefault.IsNumber && noDefault.NumberValue is null && !byName["abc_temperature"].IsSlider);
+        noDefault.NumberValue = 250;
+        noDefault.NumberValue = null;
+        Check("clearing it hands the choice back to the engine", noDefault.Value == "");
+
+        Check("a prefixed ABI name suppresses the bare spec one",
+              !DeclaredOption.SpecOnly(documented, [new DeclaredOption("Request", "yue2.cot", "a|b", "", "", false)])
+                  .Any(o => o.Name == "cot"));
+
+        // The score round trip: a planner's ABC artifact fills the abc option.
+        var score = new ArtifactEntry("score", "Text", "X:1\nK:C\nCDEF|"u8.ToArray(), "format=abc, extension=abc");
+        Check("an ABC artifact is a score", score.IsScore);
+        Check("a MIDI artifact is not", !new ArtifactEntry("midi", "Binary", [1], "extension=mid").IsScore);
+
+        Console.WriteLine(failures == 0 ? "spec options OK" : $"spec options: {failures} failure(s)");
         return failures == 0 ? 0 : 1;
     }
 

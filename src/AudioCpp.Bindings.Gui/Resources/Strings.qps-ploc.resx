@@ -176,6 +176,24 @@
   <data name="request.sourceAudio" xml:space="preserve">
     <value>⟦Sóúrcé áúdíó⟧</value>
   </data>
+  <data name="request.style" xml:space="preserve">
+    <value>⟦Stýlé⟧</value>
+  </data>
+  <data name="request.prompt" xml:space="preserve">
+    <value>⟦Prómpt⟧</value>
+  </data>
+  <data name="options.fromSpec" xml:space="preserve">
+    <value>⟦Móré óptíóns fróm thé módél spéc⟧</value>
+  </data>
+  <data name="action.useScore" xml:space="preserve">
+    <value>⟦Úsé ás scóré⟧</value>
+  </data>
+  <data name="request.lyrics" xml:space="preserve">
+    <value>⟦Lýrícs⟧</value>
+  </data>
+  <data name="voice.required" xml:space="preserve">
+    <value>⟦réqúíréd⟧</value>
+  </data>
   <data name="request.optional" xml:space="preserve">
     <value>⟦óptíónál⟧</value>
   </data>

@@ -119,6 +119,13 @@
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="Padding" Value="10,7" />
   </Style>
+  <!-- An option whose text runs to lines: an ABC score, a token list. -->
+  <Style Selector="TextBox.Long">
+    <Setter Property="AcceptsReturn" Value="True" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="Height" Value="120" />
+    <Setter Property="FontFamily" Value="monospace" />
+  </Style>
   <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
     <Setter Property="BorderBrush" Value="{DynamicResource AppActiveBorder}" />
   </Style>

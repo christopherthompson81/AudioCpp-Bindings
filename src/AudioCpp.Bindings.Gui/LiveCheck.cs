@@ -277,6 +277,82 @@ internal static class LiveCheck
                     // The artifact is the result for audio-to-MIDI, so it has to
                     // be nameable and savable, and the panel has to open on it
                     // rather than on 840 JSON objects in the transcript field.
+                    // YuE2 as its own panel: style in place of the Text box,
+                    // lyrics in a box that may stay empty, the spec's sampling
+                    // controls reaching the engine, and a planner's score fed
+                    // back as conditioning.
+                    if (args.Contains("--yue2-check"))
+                    {
+                        void Expect(string what, bool ok)
+                        {
+                            Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {what}");
+                            if (!ok) failures++;
+                        }
+                        DeclaredOption Option(string name) => viewModel.Options.First(o => o.Name == name);
+                        double Seconds() => viewModel.OutputSeconds;
+
+                        // Rows are built at load; the window may have been on
+                        // another task then, and they must still leave these out.
+                        viewModel.Task = "asr";
+                        Expect("off the gen task, no prompt or lyrics boxes",
+                               !viewModel.ShowPrompt && !viewModel.ShowLyrics);
+                        viewModel.Task = "gen";
+                        Expect($"style is the prompt ({viewModel.PromptOption?.Name})",
+                               viewModel.PromptOption?.Name == "style" && viewModel.ShowPrompt);
+                        Expect($"lyrics have their own box ({viewModel.LyricsOption?.Name})",
+                               viewModel.ShowLyrics && !viewModel.LyricsRequired);
+                        Expect("no Text box beside them", !viewModel.ShowText);
+                        Expect("neither is repeated among the option rows",
+                               !viewModel.RequestOptions.Any(o => o.Name is "style" or "lyrics"));
+                        Expect($"spec options offered ({viewModel.SpecOptions.Count}): "
+                               + string.Join(", ", viewModel.SpecOptions.Select(o => o.Name)),
+                               viewModel.SpecOptions.Count > 0
+                               && viewModel.SpecOptions.Any(o => o.Name == "semantic_temperature"));
+                        Expect("the abc editor is multi-line", Option("abc").IsLongText);
+
+                        // A missing style is caught before the engine sees it.
+                        await viewModel.RunCommand.ExecuteAsync();
+                        Console.WriteLine($"no style: {viewModel.Status}");
+                        Expect("an empty style is refused", viewModel.Status.Contains("style"));
+
+                        viewModel.PromptOption!.Value = "indie pop, bright acoustic guitar, soft drums, warm vocal";
+                        viewModel.LyricsOption!.Value = "[verse]\nMorning light on the window\nCoffee cooling by the door\n";
+                        Option("seed").Value = "7";
+                        Option("cot").Choice = "full";
+                        Option("stop_after").Choice = "abc";
+                        await viewModel.RunCommand.ExecuteAsync();
+                        Console.WriteLine($"score only: {viewModel.Status} | {viewModel.TimingBreakdown}");
+                        var score = viewModel.Artifacts.FirstOrDefault(a => a.IsScore);
+                        Expect($"the planner wrote a score ({score?.Payload.Length ?? 0} bytes)", score is not null);
+                        if (score is not null)
+                        {
+                            Console.WriteLine("  " + string.Join("\n  ", score.Preview.Split('\n').Take(6)));
+                            viewModel.UseScore(score);
+                            Expect("Use as score fills abc",
+                                   Option("abc").Value == System.Text.Encoding.UTF8.GetString(score.Payload));
+                            // The engine refuses a score-only run handed a score,
+                            // so the button has to move it on; nothing below does.
+                            Expect($"and moves stop_after off abc ({Option("stop_after").Choice})",
+                                   Option("stop_after").Choice == "audio");
+                        }
+
+                        // Instrumental, from that score, cut short by a control
+                        // only the spec declares: if semantic_max_tokens did not
+                        // reach the engine the song would run to its full length.
+                        viewModel.LyricsOption.Value = "";
+                        Option("semantic_max_tokens").NumberValue = 250;
+                        Option("semantic_min_tokens").NumberValue = 0;
+                        await viewModel.RunCommand.ExecuteAsync();
+                        Console.WriteLine($"instrumental: {viewModel.Status} | {viewModel.TimingBreakdown} | "
+                                          + $"{Seconds():F1} s of audio");
+                        Expect("an instrumental runs", viewModel.HasPreviewAudio);
+                        Expect($"semantic_max_tokens=250 bounds the song ({Seconds():F1} s)",
+                               Seconds() is > 0 and < 15);
+
+                        Console.WriteLine(failures == 0 ? "yue2 OK" : $"yue2: {failures} failure(s)");
+                        if (!args.Contains("--hold")) Environment.Exit(failures == 0 ? 0 : 1);
+                    }
+
                     if (args.Contains("--artifact-check"))
                     {
                         Console.WriteLine($"artifacts {viewModel.Artifacts.Count}, "
@@ -417,6 +493,7 @@ internal static class LiveCheck
                         {
                             "pseudo" => "Pseudo (qps-ploc)",
                             "it" => "Italiano",
+                            "ja" => "日本語",
                             "pl" => "Polski",
                             "ru" => "Русский",
                             "zh" => "中文",
@@ -854,7 +931,9 @@ internal static class LiveCheck
                         Console.WriteLine($"  {task,-6} {Resources.Strings.TaskName(task),-26} {shape}");
                         layouts.Add(shape);
 
-                        if (!viewModel.ShowText && !viewModel.ShowAudioInput)
+                        // YuE2's Style and Lyrics boxes are its inputs in place of Text.
+                        if (!viewModel.ShowText && !viewModel.ShowAudioInput
+                            && !viewModel.ShowPrompt && !viewModel.ShowLyrics)
                         {
                             Console.Error.WriteLine($"  {task} offers no input at all"); failures++;
                         }
@@ -1051,7 +1130,7 @@ internal static class LiveCheck
                     // has no equivalent for.
                     var keys = new[] { "run.run", "task.asr", "request.label",
                                        "request.splitLongText", "nav.arena", "section.events" };
-                    var cultures = new[] { "en", "it", "pl", "ru", "zh", "qps-ploc" };
+                    var cultures = new[] { "en", "it", "ja", "pl", "ru", "zh", "qps-ploc" };
                     foreach (var culture in cultures)
                     {
                         Resources.Strings.Culture = new System.Globalization.CultureInfo(culture);

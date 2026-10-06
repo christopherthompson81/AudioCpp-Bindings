@@ -83,8 +83,14 @@
   <data name="request.language" xml:space="preserve">
     <value>Язык</value>
   </data>
+  <data name="request.lyrics" xml:space="preserve">
+    <value>Текст песни</value>
+  </data>
   <data name="request.optional" xml:space="preserve">
     <value>необязательно</value>
+  </data>
+  <data name="request.prompt" xml:space="preserve">
+    <value>Запрос</value>
   </data>
   <data name="request.sourceAudio" xml:space="preserve">
     <value>Исходное аудио</value>
@@ -214,6 +220,9 @@
   </data>
   <data name="voice.reference" xml:space="preserve">
     <value>Эталонный голос</value>
+  </data>
+  <data name="voice.required" xml:space="preserve">
+    <value>обязательно</value>
   </data>
   <data name="workflow.analysis" xml:space="preserve">
     <value>Анализ аудио</value>

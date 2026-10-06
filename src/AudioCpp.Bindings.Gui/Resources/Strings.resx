@@ -188,6 +188,24 @@
   <data name="request.sourceAudio" xml:space="preserve">
     <value>Source audio</value>
   </data>
+  <data name="request.style" xml:space="preserve">
+    <value>Style</value>
+  </data>
+  <data name="request.prompt" xml:space="preserve">
+    <value>Prompt</value>
+  </data>
+  <data name="options.fromSpec" xml:space="preserve">
+    <value>More options from the model spec</value>
+  </data>
+  <data name="action.useScore" xml:space="preserve">
+    <value>Use as score</value>
+  </data>
+  <data name="request.lyrics" xml:space="preserve">
+    <value>Lyrics</value>
+  </data>
+  <data name="voice.required" xml:space="preserve">
+    <value>required</value>
+  </data>
   <data name="request.optional" xml:space="preserve">
     <value>optional</value>
   </data>

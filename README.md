@@ -15,8 +15,8 @@ bindings out — the ABI belongs upstream, the language bindings do not.
 web UI: the same seven workflows (text to speech, transcription, music and video
 generation, voice conversion, source separation, audio analysis, voice design), the same
 model manager for browsing and installing packages, and its interface strings imported
-from the web UI's own language files so the two read alike in English, Italian, Polish,
-Russian and Simplified Chinese.
+from the web UI's own language files so the two read alike in English, Italian, Japanese,
+Polish, Russian and Simplified Chinese.
 
 It also embeds a server that reimplements audio.cpp's HTTP API in C# — the OpenAI-shaped
 speech and transcription routes, alignment, voices, live ingest, model management and the
