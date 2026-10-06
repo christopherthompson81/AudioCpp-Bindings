@@ -23,7 +23,7 @@ public sealed class Loc : INotifyPropertyChanged
     /// is not helped by the word "Russian".
     /// </summary>
     /// <remarks>
-    /// The four translations come from the audio.cpp web UI, imported by
+    /// The five translations come from the audio.cpp web UI, imported by
     /// tools/locales/import_webui_locales.py, which prints this list when it
     /// runs. Adding a language upstream means running the importer and adding
     /// a row here.
@@ -32,6 +32,7 @@ public sealed class Loc : INotifyPropertyChanged
     [
         ("English", "en"),
         ("Italiano", "it"),
+        ("日本語", "ja"),
         ("Polski", "pl"),
         ("Русский", "ru"),
         ("中文", "zh"),

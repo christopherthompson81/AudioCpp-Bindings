@@ -34,7 +34,27 @@ public sealed record PackageSpec(
     bool IsDefault,
     DownloadSpec Download);
 
+/// <summary>One per-run option a spec documents for its family.</summary>
+/// <param name="Type">
+/// The spec's type; an enum's values are joined with '|', which is how the ABI
+/// spells a choice.
+/// </param>
+/// <param name="Default">The default as text: JSON strings unquoted, booleans lower-case.</param>
+public sealed record SpecOption(
+    string Name,
+    string Type,
+    string Default,
+    string Min,
+    string Max,
+    bool Required,
+    string Description);
+
 /// <summary>One model family, as model_specs/&lt;family&gt;.json describes it.</summary>
+/// <param name="RequestOptions">
+/// The request options the spec documents. The engine's ABI declares its own
+/// list, which can be shorter: YuE2's leaves out the fourteen sampling
+/// controls its request parser reads.
+/// </param>
 public sealed record FamilySpec(
     string Family,
     string DisplayName,
@@ -43,7 +63,8 @@ public sealed record FamilySpec(
     string Status,
     IReadOnlyList<string> Tasks,
     IReadOnlyList<string> Languages,
-    IReadOnlyList<PackageSpec> Packages);
+    IReadOnlyList<PackageSpec> Packages,
+    IReadOnlyList<SpecOption>? RequestOptions = null);
 
 /// <summary>
 /// The set of families audio.cpp knows how to load, read from its model_specs
@@ -142,7 +163,47 @@ public sealed class Catalog
             Str(root, "status"),
             List(root, "tasks"),
             List(root, "languages"),
-            packages);
+            packages,
+            ParseRequestOptions(root));
+    }
+
+    private static IReadOnlyList<SpecOption> ParseRequestOptions(JsonElement root)
+    {
+        if (!root.TryGetProperty("options", out var options)
+            || options.ValueKind != JsonValueKind.Object
+            || !options.TryGetProperty("request", out var request)
+            || request.ValueKind != JsonValueKind.Array) return [];
+
+        var parsed = new List<SpecOption>();
+        foreach (var entry in request.EnumerateArray())
+        {
+            var name = Str(entry, "name");
+            if (name.Length == 0) continue;
+            var values = List(entry, "values");
+            parsed.Add(new SpecOption(
+                name,
+                values.Count > 0 ? string.Join('|', values) : Str(entry, "type"),
+                Scalar(entry, "default"),
+                Scalar(entry, "min"),
+                Scalar(entry, "max"),
+                entry.TryGetProperty("required", out var r) && r.ValueKind == JsonValueKind.True,
+                Str(entry, "description")));
+        }
+        return parsed;
+    }
+
+    /// <summary>A number, string or boolean as the ABI would print it; anything else is empty.</summary>
+    private static string Scalar(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value)) return "";
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString() ?? "",
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => "",
+        };
     }
 
     private static DownloadSpec ParseDownload(JsonElement element) => new(

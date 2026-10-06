@@ -14,6 +14,37 @@
     <KeyBinding Gesture="Ctrl+Enter" Command="{Binding RunCommand}" />
   </Window.KeyBindings>
 
+  <!-- One row per declared option, for the request, session and spec lists:
+       pipe-separated types become dropdowns, bool a checkbox, bounded
+       numerics a slider, the rest a spinner or a text box. -->
+  <Window.Resources>
+    <DataTemplate x:Key="OptionRow" x:DataType="vm:DeclaredOption">
+      <Grid ColumnDefinitions="230,10,*" Margin="0,0,0,7"
+            ToolTip.Tip="{Binding Description}">
+        <TextBlock Grid.Column="0" Text="{Binding Label}" Classes="Subtle"
+                   TextWrapping="Wrap" VerticalAlignment="Center" />
+        <ComboBox Grid.Column="2" IsVisible="{Binding IsChoice}"
+                  ItemsSource="{Binding Choices}" SelectedItem="{Binding Choice}"
+                  HorizontalAlignment="Stretch" />
+        <CheckBox Grid.Column="2" IsVisible="{Binding IsToggle}"
+                  IsChecked="{Binding Toggle}" />
+        <Slider Grid.Column="2" IsVisible="{Binding IsSlider}"
+                Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
+                Value="{Binding NumberValue}" />
+        <NumericUpDown Grid.Column="2" IsVisible="{Binding IsNumber}"
+                       Value="{Binding NumberValue}" Increment="{Binding NumberStep}"
+                       Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
+                       HorizontalAlignment="Stretch" />
+        <Grid Grid.Column="2" ColumnDefinitions="*,Auto" IsVisible="{Binding IsText}">
+          <TextBox Grid.Column="0" Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}"
+                   Classes.Long="{Binding IsLongText}" />
+          <Button Grid.Column="1" Content="Browse…" Margin="6,0,0,0" IsVisible="{Binding IsPath}"
+                  Click="OnPickOptionPath" Tag="{Binding}" />
+        </Grid>
+      </Grid>
+    </DataTemplate>
+  </Window.Resources>
+
   <DockPanel>
 
     <!-- Top bar: identity on the left, global settings on the right. -->
@@ -526,6 +557,28 @@
                          TextWrapping="Wrap" PlaceholderText="{Binding [request.textPlaceholder], Source={x:Static res:Loc.Current}}" />
               </StackPanel>
 
+              <!-- A prompt the family takes as an option (YuE2's style), in
+                   place of the Text box: see PromptOption. -->
+              <StackPanel Spacing="4" IsVisible="{Binding ShowPrompt}">
+                <TextBlock Text="{Binding PromptLabel}" Classes="Label" />
+                <TextBox Text="{Binding PromptOption.Value, FallbackValue=''}" AcceptsReturn="True" Height="64"
+                         TextWrapping="Wrap" ToolTip.Tip="{Binding PromptOption.Description, FallbackValue=''}"
+                         PlaceholderText="{Binding PromptOption.Description, FallbackValue=''}" />
+              </StackPanel>
+
+              <StackPanel Spacing="4" IsVisible="{Binding ShowLyrics}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="{Binding [request.lyrics], Source={x:Static res:Loc.Current}}" Classes="Label" />
+                  <TextBlock Text="{Binding [request.optional], Source={x:Static res:Loc.Current}}" Classes="Subtle"
+                             VerticalAlignment="Center" IsVisible="{Binding !LyricsRequired}" />
+                  <TextBlock Text="{Binding [voice.required], Source={x:Static res:Loc.Current}}" Classes="Subtle"
+                             VerticalAlignment="Center" IsVisible="{Binding LyricsRequired}" />
+                </StackPanel>
+                <TextBox Text="{Binding LyricsOption.Value, FallbackValue=''}" AcceptsReturn="True" Height="150"
+                         TextWrapping="Wrap" ToolTip.Tip="{Binding LyricsOption.Description, FallbackValue=''}"
+                         PlaceholderText="[verse]&#10;…&#10;&#10;[chorus]&#10;…" />
+              </StackPanel>
+
               <!-- A WrapPanel, not two grid columns: "Split and merge long text"
                    is three words longer in Russian, and a fixed split wrapped it
                    to three lines while the spinner kept its width. -->
@@ -630,66 +683,19 @@
               <!-- Typed editors built from what the model reports: pipe-separated
                    types become dropdowns, bool becomes a checkbox, bounded
                    numerics a slider, the rest a spinner or a text box. -->
-              <ItemsControl ItemsSource="{Binding RequestOptions}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:DeclaredOption">
-                    <Grid ColumnDefinitions="230,10,*" Margin="0,0,0,7"
-                          ToolTip.Tip="{Binding Description}">
-                      <TextBlock Grid.Column="0" Text="{Binding Label}" Classes="Subtle"
-                                 TextWrapping="Wrap" VerticalAlignment="Center" />
-                      <ComboBox Grid.Column="2" IsVisible="{Binding IsChoice}"
-                                ItemsSource="{Binding Choices}" SelectedItem="{Binding Choice}"
-                                HorizontalAlignment="Stretch" />
-                      <CheckBox Grid.Column="2" IsVisible="{Binding IsToggle}"
-                                IsChecked="{Binding Toggle}" />
-                      <Slider Grid.Column="2" IsVisible="{Binding IsSlider}"
-                              Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
-                              Value="{Binding NumberValue}" />
-                      <NumericUpDown Grid.Column="2" IsVisible="{Binding IsNumber}"
-                                     Value="{Binding NumberValue}" Increment="{Binding NumberStep}"
-                                     Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
-                                     HorizontalAlignment="Stretch" />
-                      <Grid Grid.Column="2" ColumnDefinitions="*,Auto" IsVisible="{Binding IsText}">
-                        <TextBox Grid.Column="0" Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}" />
-                        <Button Grid.Column="1" Content="Browse…" Margin="6,0,0,0" IsVisible="{Binding IsPath}"
-                                Click="OnPickOptionPath" Tag="{Binding}" />
-                      </Grid>
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
+              <ItemsControl ItemsSource="{Binding RequestOptions}" ItemTemplate="{StaticResource OptionRow}" />
+
+              <!-- What the family's spec documents and the ABI does not
+                   declare: for YuE2, the semantic and ABC-planner sampling. -->
+              <Expander Header="More options from the model spec" IsVisible="{Binding HasSpecOptions}">
+                <ItemsControl ItemsSource="{Binding SpecOptions}" Margin="0,8,0,0"
+                              ItemTemplate="{StaticResource OptionRow}" />
+              </Expander>
 
               <!-- Session options are shown apart because changing one rebuilds
                    the session: a different promise from a per-run setting. -->
               <Expander Header="Session options — changing one rebuilds the session">
-                <ItemsControl ItemsSource="{Binding SessionOptions}" Margin="0,8,0,0">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:DeclaredOption">
-                      <Grid ColumnDefinitions="230,10,*" Margin="0,0,0,7"
-                            ToolTip.Tip="{Binding Description}">
-                        <TextBlock Grid.Column="0" Text="{Binding Label}" Classes="Subtle"
-                                   TextWrapping="Wrap" VerticalAlignment="Center" />
-                        <ComboBox Grid.Column="2" IsVisible="{Binding IsChoice}"
-                                  ItemsSource="{Binding Choices}" SelectedItem="{Binding Choice}"
-                                  HorizontalAlignment="Stretch" />
-                        <CheckBox Grid.Column="2" IsVisible="{Binding IsToggle}"
-                                  IsChecked="{Binding Toggle}" />
-                        <Slider Grid.Column="2" IsVisible="{Binding IsSlider}"
-                                Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
-                                Value="{Binding NumberValue}" />
-                        <NumericUpDown Grid.Column="2" IsVisible="{Binding IsNumber}"
-                                       Value="{Binding NumberValue}" Increment="{Binding NumberStep}"
-                                       Minimum="{Binding NumberMin}" Maximum="{Binding NumberMax}"
-                                       HorizontalAlignment="Stretch" />
-                        <Grid Grid.Column="2" ColumnDefinitions="*,Auto" IsVisible="{Binding IsText}">
-                          <TextBox Grid.Column="0" Text="{Binding Value}" PlaceholderText="{Binding DefaultDisplay}" />
-                          <Button Grid.Column="1" Content="Browse…" Margin="6,0,0,0" IsVisible="{Binding IsPath}"
-                                  Click="OnPickOptionPath" Tag="{Binding}" />
-                        </Grid>
-                      </Grid>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <ItemsControl ItemsSource="{Binding SessionOptions}" Margin="0,8,0,0" ItemTemplate="{StaticResource OptionRow}" />
               </Expander>
 
               <!-- The full surface stays reachable: nothing hardcoded means
@@ -785,7 +791,7 @@
                       <DataTemplate x:DataType="vm:ArtifactEntry">
                         <Border Classes="Card" Padding="12" Margin="0,0,0,8">
                           <StackPanel Spacing="4">
-                            <Grid ColumnDefinitions="*,Auto">
+                            <Grid ColumnDefinitions="*,Auto,Auto">
                               <StackPanel Grid.Column="0" Spacing="2">
                                 <TextBlock Text="{Binding Id}" Classes="Label" />
                                 <TextBlock Text="{Binding Summary}" Classes="Subtle" FontSize="11" />
@@ -793,7 +799,11 @@
                               <!-- For audio-to-MIDI the artifact is the result:
                                    a .mid file that could be previewed but not
                                    taken out of the app. -->
-                              <Button Grid.Column="1" VerticalAlignment="Top"
+                              <!-- A planner's score, fed back to keep its melody. -->
+                              <Button Grid.Column="1" VerticalAlignment="Top" Margin="0,0,6,0"
+                                      Content="Use as score" IsVisible="{Binding IsScore}"
+                                      Click="OnUseScore" Tag="{Binding}" />
+                              <Button Grid.Column="2" VerticalAlignment="Top"
                                       Content="{Binding [action.save], Source={x:Static res:Loc.Current}}"
                                       Click="OnSaveArtifact" Tag="{Binding}" />
                             </Grid>

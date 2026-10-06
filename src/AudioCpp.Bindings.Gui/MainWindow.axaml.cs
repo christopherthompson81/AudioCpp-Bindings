@@ -43,6 +43,15 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnUseScore(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: ArtifactEntry artifact }
+            && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.UseScore(artifact);
+        }
+    }
+
     private async void OnPlayStream(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (sender is Button { Tag: NamedAudioEntry stream }

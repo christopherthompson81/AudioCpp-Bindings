@@ -188,6 +188,12 @@
   <data name="request.sourceAudio" xml:space="preserve">
     <value>Source audio</value>
   </data>
+  <data name="request.lyrics" xml:space="preserve">
+    <value>Lyrics</value>
+  </data>
+  <data name="voice.required" xml:space="preserve">
+    <value>required</value>
+  </data>
   <data name="request.optional" xml:space="preserve">
     <value>optional</value>
   </data>
